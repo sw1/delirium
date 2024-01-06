@@ -1,6 +1,7 @@
 #files
 #*.ipynb
 *.Rproj.user
+*.Rproj
 *.Rhistory
 *.RData
 *.Ruserdata
