@@ -1,0 +1,25 @@
+#files
+#*.ipynb
+*.Rproj.user
+*.Rhistory
+*.RData
+*.Ruserdata
+
+#folders
+__pycache__
+*/__pycache__/*
+code/__pycache__/
+data_in/*
+data_in/
+data_out/*
+data_out/
+data_tmp/*
+data_tmp/
+to_python/*
+to_python/
+
+#large files
+*.pkl
+*.pkl*
+*.csv
+*.csv*
