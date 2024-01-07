@@ -66,7 +66,7 @@ features <- NULL
 m <- 'f_meas'
 
 
-tree_fit <- read_rds(file.path(path,'data_in',paste0('fit_',ds,sprintf('_%s.rds',ss))))
+tree_fit <- read_rds(file.path(path,'data_in',paste0('fit_tree_',ds,sprintf('_%s.rds',ss))))
 
 best_tree <- tree_fit$fit %>% select_best(m)
 wf <- tree_fit$wf %>% 
@@ -137,7 +137,7 @@ haobo <- haobo %>%
   mutate(los=replace(los,is.infinite(los),NA),
          los=replace(los,is.na(los),mean(los,na.rm=TRUE))) %>%
   mutate(
-    count_del=1*str_count(hc,'deliri|cam|cows'),
+    count_del=1*str_count(hc,'deliri| cam |cows'),
     count_postdel=1*str_count(hc,'postop deli|postoperative deli'),
     count_del_dd=1*str_count(discharge_diagnosis,'deliri'),
     count_del_ms=1*str_count(mental_status,'deliri'),
@@ -191,7 +191,7 @@ haobo <- haobo %>%
   select(-note_overlap,-date_nurs) %>%
   distinct() %>%
   mutate(
-    count_nurse_del=1*str_count(note_nurs,'deliri|cam|cows'),
+    count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
     count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
     count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
     count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
@@ -226,7 +226,7 @@ if (ds == 'binary_nodel'){
 write_rds(haobo_post,file.path(path,'data_tmp',sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
 
 haobo_post <- read_rds(file.path(path,'data_tmp',sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
-tree_fit <- read_rds(file.path(path,'data_in',paste0('fit_',ds,sprintf('_%s.rds',ss))))
+tree_fit <- read_rds(file.path(path,'data_in',paste0('fit_tree_',ds,sprintf('_%s.rds',ss))))
 
 m <- 'f_meas'
 # best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,tree_depth,desc(min_n))

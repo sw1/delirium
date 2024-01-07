@@ -58,7 +58,7 @@ lab <- labs[3]
 
 mets <- metric_set(accuracy, sens, yardstick::spec, f_meas, roc_auc)
 
-tree_fit <- read_rds(file.path(path,'data_in',sprintf('fit_count_del_%s.rds',lab)))
+tree_fit <- read_rds(file.path(path,'data_in',sprintf('fit_tree_count_del_%s.rds',lab)))
 
 haobo_pre <- tree_fit$data
 m <- 'f_meas'

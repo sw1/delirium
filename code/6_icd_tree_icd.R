@@ -120,7 +120,7 @@ haobo <- haobo %>%
   mutate(los=replace(los,is.infinite(los),NA),
          los=replace(los,is.na(los),mean(los,na.rm=TRUE))) %>%
   mutate(
-    count_del=1*str_count(hc,'deliri|cam|cows'),
+    count_del=1*str_count(hc,'deliri| cam |cows'),
     count_postdel=1*str_count(hc,'postop deli|postoperative deli'),
     count_del_dd=1*str_count(discharge_diagnosis,'deliri'),
     count_del_ms=1*str_count(mental_status,'deliri'),
@@ -174,7 +174,7 @@ haobo <- haobo %>%
   select(-note_overlap,-date_nurs) %>%
   distinct() %>%
   mutate(
-    count_nurse_del=1*str_count(note_nurs,'deliri|cam|cows'),
+    count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
     count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
     count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
     count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
@@ -291,7 +291,7 @@ fit <- wf %>%
 write_rds(list(data=haobo_pre,fit=fit,wf=wf,
                split=d_split,
                train_ids=ids_train,test_ids=ids_test),
-          file.path(path,'data_in',paste0('fit_',ds,sprintf('_%s.rds',ss))))
+          file.path(path,'data_in',paste0('fit_tree_',ds,sprintf('_%s.rds',ss))))
 
   
 stopCluster(cl)
