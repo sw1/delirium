@@ -1,5 +1,5 @@
 #files
-#*.ipynb
+*.ipynb
 *.Rproj.user
 *.Rproj
 *.Rhistory
@@ -18,6 +18,9 @@ data_tmp/*
 data_tmp/
 to_python/*
 to_python/
+sync/*
+sync/
+sync/sync_script.sh
 
 #large files
 *.pkl
