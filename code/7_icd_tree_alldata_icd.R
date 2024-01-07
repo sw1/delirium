@@ -226,7 +226,6 @@ if (ds == 'binary_nodel'){
 write_rds(haobo_post,file.path(path,'data_tmp',sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
 
 haobo_post <- read_rds(file.path(path,'data_tmp',sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
-
 tree_fit <- read_rds(file.path(path,'data_in',paste0('fit_',ds,sprintf('_%s.rds',ss))))
 
 m <- 'f_meas'
