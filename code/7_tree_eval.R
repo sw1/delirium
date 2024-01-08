@@ -5,52 +5,8 @@ library(doParallel)
 library(vip)
 library(rpart.plot)
 
-get_rules <- function(x){
-  y <- matrix('',nrow=nrow(x),ncol=3)
-  for (i in 1:nrow(x)){
-    d <- as.numeric(x[i,1])
-    y[i,3] <- d
-    if (d < 0.5){
-      y[i,1] <- paste0('v',100-i)
-    }else{
-      y[i,1] <- paste0('v',nrow(x)-i+1)
-    }
-    y[i,2] <- gsub('\\s+',' ',
-                   paste0(
-                     gsub('is','==',x[i,3:ncol(x)]),collapse=' '))
-    y[i,2] <- paste0('if_else(',y[i,2],',1,0)')
-    
-  }
-  return(y)
-}
-
-new_var <- function(df,v1,v2){
-  df %>% mutate(!!rlang::parse_expr(v1) := !!rlang::parse_expr(v2))
-}
-
-update_df <- function(df,r){
-  for (i in 1:nrow(r)){
-    v1 <- r[i,1]
-    v2 <- r[i,2]
-    df <- new_var(df,v1,v2)
-  }
-  return(df)
-}
-
-get_icds <- function(x){
-  z <- NULL
-  for (i in 1:nrow(x)){
-    r <- unlist(rules[i,])
-    y <- r[startsWith(r,'icd_')]
-    y <- gsub('icd_','',y)
-    z <- c(z,y)
-  }
-  return(unique(z))
-}
-
-
-
 path <- 'D:\\Dropbox\\embeddings'
+source(file.path(path,'code','fxns.R'))
 
 labs <- c('sub_chapter','major','icd')
 

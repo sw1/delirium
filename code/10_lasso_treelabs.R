@@ -5,9 +5,8 @@ library(tidyverse)
 library(doParallel)
 library(caret)
 
-z <- function(x) (x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
-
 path <- 'D:\\Dropbox\\embeddings\\delirium'
+source(file.path(path,'code','fxns.R'))
 
 sets <- c('baseline','sub_chapter','major','icd')
 
