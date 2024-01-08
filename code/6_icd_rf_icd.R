@@ -15,7 +15,13 @@ n_folds <- 10
 n_sweep <- 5
 col_filter <- 10
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox'
+}
+
 source(file.path(path,'code','fxns.R'))
 
 mod <- 'rf'

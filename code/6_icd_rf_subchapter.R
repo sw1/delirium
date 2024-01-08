@@ -11,7 +11,13 @@ all_cores <- parallel::detectCores(logical = FALSE)
 cl <- makePSOCKcluster(all_cores)
 registerDoParallel(cl)
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox'
+}
+
 source(file.path(path,'code','fxns.R'))
 
 n_folds <- 10
@@ -23,7 +29,7 @@ subsets <- c('sub_chapter','major')
 
 for(ss in subsets){
   
-  haobo <- read_rds(file.path(path,'data_in',
+  haobo <- read_rds(file.path(path,'data_out',
                               sprintf('full_icd_tbl_%s.rds',
                                       gsub('_','',ss)))) %>%
     select(-icd_codes) %>%

@@ -10,7 +10,12 @@ all_cores <- parallel::detectCores(logical = FALSE)
 cl <- makePSOCKcluster(all_cores)
 registerDoParallel(cl)
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox'
+}
 source(file.path(path,'code','fxns.R'))
 
 n_folds <- 10
