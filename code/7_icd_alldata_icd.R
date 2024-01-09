@@ -17,8 +17,13 @@ source(file.path(path,'code','fxns.R'))
 
 ss <- 'icd'
 
-tree_fit <- read_rds(file.path(path,'data_in',sprintf('fit_tree_count_del_%s.rds',ss)))
+tree_fit <- read_rds(file.path(path,
+                               'data_in',
+                               sprintf('fit_tree_count_del_%s.rds',ss)))
 features <- tree_fit$data %>% select(-id,-label) %>% colnames()
+features_icds_tree <- gsub('icd_',
+                           '',
+                           features[!str_detect(features,'^count_|^los_')])
 
 haobo <- read_rds(file.path(path,'data_in',
                             sprintf('full_icd_tbl_%s.rds',
@@ -29,7 +34,6 @@ haobo <- read_rds(file.path(path,'data_in',
 
 features_icds <- unique(unlist(haobo$icd_codes))
 features_icds <- features_icds[features_icds %in% features_icds_tree]
-# features_icds <- features_icds[nchar(features_icds) > 0]
 icd_mat <- matrix(0,nrow(haobo),length(features_icds))
 colnames(icd_mat) <- paste0('icd_',features_icds)
 for (i in 1:nrow(haobo)){
@@ -69,5 +73,7 @@ haobo <- create_counts(haobo)
 haobo_post <- haobo %>%
   select(!starts_with(c('icd_','count_','los_')),contains(features))
 
-write_rds(haobo_post,file.path(path,'data_in',sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
+write_rds(haobo_post,file.path(path,'data_in',
+                               sprintf('alldat_preprocessed_for_pred_%s.rds',
+                                       ss)))
 
