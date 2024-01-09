@@ -35,6 +35,10 @@ for (ss in subsets){
                     sprintf('tbl_to_python_updated_count_del_%s_%s.csv.gz',
                             mod,ss)),
                   col_names=TRUE)
+        
+        cat(do.call(sprintf, 
+                    c(fmt='Predicted labels (%s, %s): \n0: %s\n1: %s.\n', 
+                      as.list(c(mod,ss,table(tbl_update$label_icd))))))
       }
       
       if (mod == 'rf'){
@@ -48,12 +52,20 @@ for (ss in subsets){
             mutate(label_icd=if_else(label_icd >= p,1,0))
           
           write_csv(
-            tbl_update,
+            tbl_tmp,
             file.path(path,'to_python',
                       sprintf('tbl_to_python_updated_count_del_%s%s_%s.csv.gz',
-                              m,p*100,ss)),
+                              mod,p*100,ss)),
                     col_names=TRUE)
+          
+          cat(do.call(
+            sprintf,c(fmt='Predicted labels (%s, %s, p=%s): \n0: %s\n1: %s.\n',
+                      as.list(c(mod,ss,p,table(tbl_tmp$label_icd))))))
         }
       }
+      
+      cat(do.call(
+        sprintf,c(fmt='Dimensions of table (%s, %s): %s x %s.\n',
+                  as.list(c(mod,ss,dim(tbl_update))))))
   }
 }

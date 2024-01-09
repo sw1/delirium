@@ -108,10 +108,6 @@ def logit(p):
 def inv_logit(p):
     return np.exp(p) / (1 + np.exp(p))
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-print("\n\nNumber of devices: %s.\n \
-    Device set to %s.\n\n" % (torch.cuda.device_count(),device))
-
 os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
@@ -126,28 +122,71 @@ pipelines = ('finetune repo model',
              'finetune pretrained model',
              'finetune pretrained model that used custom tokenizer')
 
-label_updates =  ('none',
-                 'icd',
-                 'major',
-                 'subchapter')
+tree_mods = ('rf','tree')
 
-if len(sys.argv) >  2 and sys.argv[1] in ['1','2','3'] and sys.argv[2] in label_updates:
+label_updates =  ('icd',
+                 'major',
+                 'sub_chapter')
+
+props = ('50','60','65','70')
+
+exit_break = "\nSpecify a pipeline, model, label update, and, if rf, a proportion (see below):\n\n \
+        \t pipeline 1: %s\n \
+        \t pipeline 2: %s\n \
+        \t pipeline 3: %s\n \
+        \t model %s\n \
+        \t model %s\n \
+        \t label %s\n \
+        \t label %s\n \
+        \t label %s\n \
+        \t proportion %s\n \
+        \t proportion %s\n \
+        \t proportion %s\n \
+        \t proportion %s\n" % (pipelines + tree_mods + label_updates + props)
+
+if len(sys.argv) > 1:
     pipeline = int(sys.argv[1]) 
-    label_update = str(sys.argv[2])
-    print('Running pipeline %s (%s) with label update set to %s.' % (str(pipeline),
-                                                                     pipelines[pipeline-1],
-                                                                     label_update))
-else:
-    print(pipelines + label_updates)
-    sys.exit("\nSpecify a pipeline (1-3) and label update(see below):\n\n \
-        \t1: %s\n \
-        \t2: %s\n \
-        \t3: %s\n \
-        \t-: %s\n \
-        \t-: %s\n \
-        \t-: %s\n \
-        \t-: %s\n" % (pipelines + label_updates))
+    label_update = 'none'
     
+    if len(sys.argv) == 2 and sys.argv[1] in ['1','2','3']:
+        print('Running pipeline %s: %s\n' % (str(pipeline),pipelines[pipeline-1]))
+        
+    elif len(sys.argv) < 4 or len(sys.argv) > 5:
+        sys.exit(exit_break)
+        
+    elif sys.argv[1] in ['1','2','3'] and sys.argv[2] in tree_mods and sys.argv[3] in label_updates:            
+        tree_mod = str(sys.argv[2])
+        label_update = str(sys.argv[3])
+        
+        if tree_mod == 'rf':
+            
+            if len(sys.argv) == 5 and sys.argv[4] in props:
+                prop = str(sys.argv[4])
+                print('Running pipeline %s (%s) with %s (p=%s) %s label updates.' % (str(pipeline),
+                                                                                       pipelines[pipeline-1],
+                                                                                       tree_mod,
+                                                                                       prop,
+                                                                                       label_update))
+            else:
+                sys.exit("\nMust specify a proportion if model is rf.\n")
+
+        if tree_mod == 'tree':
+            print('Running pipeline %s (%s) with %s %s label updates.' % (str(pipeline),
+                                                                          pipelines[pipeline-1],
+                                                                          tree_mod,
+                                                                          label_update))
+        
+    else:
+        sys.exit(exit_break)
+else:
+    sys.exit(exit_break)
+    
+    
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+print("\n\nNumber of devices: %s.\n \
+    Device set to %s.\n\n" % (torch.cuda.device_count(),device))
+
+
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
 data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
@@ -171,18 +210,14 @@ model_token_pretrain = os.path.join(pretrain_dir,'model_token_pretrain')
 out_token = os.path.join(token_dir,'custom_tokenizer.json')
 
 if label_update != 'none':
-    if label_update == 'subchapter':
-        finetune_dir = os.path.join(finetune_dir,'updated_labels','subchapter')
-        tbl_fn = re.sub('.csv.gz','_count_del_subchapter.csv.gz',tbl_fn)
-        print('Updating to %s tree labels.' % label_update)
-    if label_update == 'major':
-        finetune_dir = os.path.join(finetune_dir,'updated_labels','major')
-        tbl_fn = re.sub('.csv.gz','_count_del_major.csv.gz',tbl_fn)
-        print('Updating to %s tree labels.' % label_update)
-    if label_update == 'icd':
-        finetune_dir = os.path.join(finetune_dir,'updated_labels','icd')
-        tbl_fn = re.sub('.csv.gz','_count_del_icd.csv.gz',tbl_fn)
-        print('Updating to %s tree labels.' % label_update)
+    finetune_dir = os.path.join(finetune_dir,'updated_labels',tree_mod,label_update)
+    tbl_fn_suffix = '_count_del_' + tree_mod + '_' + label_update + '.csv.gz'
+    tbl_fn = re.sub('.csv.gz',tbl_fn_suffix,tbl_fn)
+    if tree_mod == 'rf':
+        finetune_dir = os.path.join(finetune_dir,prop)
+        tbl_fn = re.sub(tree_mod, tree_mod + prop,tbl_fn)
+    
+print('\nModel output filename:\n%s' % tbl_fn)    
     
 dat = read_data(os.path.join(data_dir,tbl_fn))
 
@@ -215,6 +250,8 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
     out_dir = out_token_pretrain_finetune
+
+print('\nModel output directly:\n%s' % out_dir) 
 
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 

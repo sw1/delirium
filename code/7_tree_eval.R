@@ -22,16 +22,19 @@ mod <- mods[1]
 
 mets <- metric_set(accuracy, sens, yardstick::spec, f_meas, roc_auc)
 
-tree_fit <- read_rds(file.path(path,'data_in',sprintf('fit_%s_count_del_%s.rds',mod,ss)))
+tree_fit <- read_rds(file.path(path,'data_in',
+                               sprintf('fit_%s_count_del_%s.rds',mod,ss)))
 
 haobo_pre <- tree_fit$data
 m <- 'f_meas'
 
 if (mod == 'rf'){
-  best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
+  best_tree <- tree_fit$fit %>% 
+    select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
 }
 if (mod == 'tree'){
-  best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),tree_depth)
+  best_tree <- tree_fit$fit %>% 
+    select_by_pct_loss(metric=m,limit=5,desc(min_n),tree_depth)
 }
 
 tree_fit$fit %>% show_best(m)
