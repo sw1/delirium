@@ -7,7 +7,12 @@ library(rpart.plot)
 
 
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+}
 source(file.path(path,'code','fxns.R'))
 
 subsets <- c('sub_chapter','major')

@@ -6,7 +6,13 @@ library(vip)
 library(rpart.plot)
 library(ranger)
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+}
+source(file.path(path,'code','fxns.R'))
 
 mods <- c('rf','tree')
 subsets <- c('icd','sub_chapter','major')
@@ -26,10 +32,10 @@ for (mod in mods){
     tree_fit <- read_rds(file.path(path,'data_in',sprintf('fit_%s_count_del_%s.rds',mod,ss)))
     
     if (mod == 'rf'){
-      best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),mtry,trees)
+      best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
     }
     if (mod == 'tree'){
-      best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,tree_depth,desc(min_n))
+      best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),tree_depth)
     }
     
     wf <- tree_fit$wf %>% 

@@ -5,7 +5,12 @@ library(tm)
 
 a <- 1e-5
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+}
 
 cat('Reading table.\n')
 dat <- read_csv(file.path(path,'to_python','tbl_to_python_updated.csv.gz')) %>%

@@ -1,6 +1,12 @@
 library(tidyverse)
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+}
+source(file.path(path,'code','fxns.R'))
 
 tbl <- read_csv(file.path(path,'to_python','tbl_to_python_updated.csv.gz'))
 
@@ -33,7 +39,7 @@ for (ss in subsets){
         
         for (p in c(0.5,0.6,0.65,.7)){
           tbl_tmp <- tbl_update %>%
-            mutate(label_icd=if_else(label_icd > p,1,0))
+            mutate(label_icd=if_else(label_icd >= p,1,0))
           
           write_csv(tbl_update,
                     file.path(path,'to_python',sprintf('tbl_to_python_updated_count_del_%s%s_%s.csv.gz',m,p*100,ss)),
