@@ -63,7 +63,9 @@ for (ss in subsets){
   # create metadata
   haobo <- create_counts(haobo)
   
-  write_rds(haobo,file.path(path,'data_in',sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
+  write_rds(haobo,file.path(path,
+                            'data_in',
+                            sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
 
 }
 

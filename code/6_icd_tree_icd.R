@@ -115,8 +115,10 @@ haobo_pre <- haobo_train %>%
   mutate(label=as.factor(label)) 
 
 ids_train <- haobo_pre %>% anti_join(ids_test,by='id') %>% select(id)
-d_split <- make_splits(x=haobo_pre %>% anti_join(ids_test,by='id') %>% select(-id),
-                       assessment=haobo_pre %>% semi_join(ids_test,by='id') %>% select(-id))
+d_split <- make_splits(x=haobo_pre %>% 
+                         anti_join(ids_test,by='id') %>% select(-id),
+                       assessment=haobo_pre %>% 
+                         semi_join(ids_test,by='id') %>% select(-id))
 d_test <- testing(d_split)
 d_train <- training(d_split)
 

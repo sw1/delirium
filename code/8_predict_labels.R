@@ -17,25 +17,27 @@ source(file.path(path,'code','fxns.R'))
 mods <- c('rf','tree')
 subsets <- c('icd','sub_chapter','major')
 
-ds <- 'count_del'
-
 m <- 'f_meas'
 
 for (mod in mods){
   for (ss in subsets){
     
-    haobo_post <- read_rds(file.path(path,
-                                     'data_in',
-                                     sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
+    haobo_post <- read_rds(
+      file.path(path,'data_in',
+                sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
     
     # change this to have rf and tree
-    tree_fit <- read_rds(file.path(path,'data_in',sprintf('fit_%s_count_del_%s.rds',mod,ss)))
+    tree_fit <- read_rds(
+      file.path(path,'data_in',
+                sprintf('fit_%s_count_del_%s.rds',mod,ss)))
     
     if (mod == 'rf'){
-      best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
+      best_tree <- tree_fit$fit %>% 
+        select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
     }
     if (mod == 'tree'){
-      best_tree <- tree_fit$fit %>% select_by_pct_loss(metric=m,limit=5,desc(min_n),tree_depth)
+      best_tree <- tree_fit$fit %>% 
+        select_by_pct_loss(metric=m,limit=5,desc(min_n),tree_depth)
     }
     
     wf <- tree_fit$wf %>% 
@@ -65,7 +67,9 @@ for (mod in mods){
       labels <- ids %>% bind_cols(preds) %>% rename(label_tree=.pred_class)
     }
 
-    write_csv(labels,file.path(path,'data_in',sprintf('labels_%s_count_del_%s.csv.gz',mod,ss)),
+    write_csv(labels,file.path(path,'data_in',
+                               sprintf('labels_%s_count_del_%s.csv.gz',
+                                       mod,ss)),
               col_names=TRUE)
     
   }
