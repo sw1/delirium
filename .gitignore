@@ -21,6 +21,8 @@ to_python/
 sync/*
 sync/
 sync/sync_script.sh
+.github/*
+.github/
 
 #large files
 *.pkl
