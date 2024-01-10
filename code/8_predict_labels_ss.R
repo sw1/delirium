@@ -76,11 +76,12 @@ for (ss in subsets){
     ) %>%
       set_engine("ranger",num.threads=all_cores,verbose=TRUE) %>%
       set_mode("classification")
+    # could consider adding regularization but it disables multithreading
     
     set.seed(7)
     r <- 0
     n_pred <- 0
-    tol_0 <- 99999
+    tol_0 <- Inf
     tol_counter <- 0
     while (n_pred < nrow(haobo_post)){
      

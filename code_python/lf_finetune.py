@@ -231,6 +231,9 @@ d_val = Dataset.from_dict(dat['val'])
 d_test_haobo = Dataset.from_dict(dat['test_haobo'])
 d_test_icd = Dataset.from_dict(dat['test_icd'])
 
+d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_treeheldout.csv.gz'))
+d_heldout = Dataset.from_dict(d_heldout['test_haobo'])
+
 if pipeline == 1: # finetune with repo model
     mod = 'yikuan8/Clinical-Longformer' 
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
@@ -251,7 +254,7 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
     out_dir = out_token_pretrain_finetune
 
-print('\nModel output directly:\n%s' % out_dir) 
+print('\nModel output directory:\n%s' % out_dir) 
 
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
@@ -284,6 +287,7 @@ d_test_haoboset_hpi = d_test_haobo.remove_columns('text').rename_column('hpi','t
 d_test_icdset_hpi = d_test_icd.remove_columns('text').rename_column('hpi','text').map(tokenize_dataset,batched=True,num_proc=16)
 d_test_haobolabels_hpihc = d_test_haobo.remove_columns('labels').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
 d_test_haobolabels_hpi = d_test_haobo.remove_columns(['text','labels']).rename_column('hpi','text').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
+d_heldout_haobolabels_hpihc = d_heldout.remove_columns('labels').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
 
 if balance_data:
     print("Balancing training data.")
@@ -425,6 +429,9 @@ print([d_test_icd['labels'].count(0),d_test_icd['labels'].count(1)])
 print('Testing Haobo groups.')
 print([d_test_haobo['labels'].count(0),d_test_haobo['labels'].count(1)])
 
+print('Testing Heldout groups.')
+print([d_heldout_haobolabels_hpihc['labels'].count(0),d_heldout_haobolabels_hpihc['labels'].count(1)])
+
 trainer = cTrainer(
     model=model.to(device),
     args=training_args,
@@ -507,6 +514,11 @@ print(y_test[2])
 print('Testing Haobo labels, HPI only.')
 y_test = trainer.predict(d_test_haobolabels_hpi)
 test_results['haobolabels_hpi'] = y_test
+print(y_test[2])
+
+print('Testing Heldout Haobo labels, HPI-HC.')
+y_test = trainer.predict(d_heldout_haobolabels_hpihc)
+test_results['heldout'] = y_test
 print(y_test[2])
 
 with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:

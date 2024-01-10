@@ -108,27 +108,84 @@ def logit(p):
 def inv_logit(p):
     return np.exp(p) / (1 + np.exp(p))
 
-print(torch.cuda.device_count())
-
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-print(device)
-
 os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
-
-pipelines = ('finetune repo model',
-             'finetune pretrained model',
-             'finetune pretrained model that used custom tokenizer')
 
 s1 = 1234 
 seq_len = 4096
 balance_data = True
 no_punc = False
-subchapter = False
+label_update = 'subchapter' # 'icd' or 'major' or 'subchapter'
 
-pipeline = int(sys.argv[1]) 
-update_labels = int(sys.argv[2])
+pipelines = ('finetune repo model',
+             'finetune pretrained model',
+             'finetune pretrained model that used custom tokenizer')
+
+tree_mods = ('rf','tree')
+
+label_updates =  ('icd',
+                 'major',
+                 'sub_chapter')
+
+props = ('50','60','65','70')
+
+exit_break = "\nSpecify a pipeline, model, label update, and, if rf, a proportion (see below):\n\n \
+        \t pipeline 1: %s\n \
+        \t pipeline 2: %s\n \
+        \t pipeline 3: %s\n \
+        \t model %s\n \
+        \t model %s\n \
+        \t label %s\n \
+        \t label %s\n \
+        \t label %s\n \
+        \t proportion %s\n \
+        \t proportion %s\n \
+        \t proportion %s\n \
+        \t proportion %s\n" % (pipelines + tree_mods + label_updates + props)
+
+if len(sys.argv) > 1:
+    pipeline = int(sys.argv[1]) 
+    label_update = 'none'
+    
+    if len(sys.argv) == 2 and sys.argv[1] in ['1','2','3']:
+        print('Running pipeline %s: %s\n' % (str(pipeline),pipelines[pipeline-1]))
+        
+    elif len(sys.argv) < 4 or len(sys.argv) > 5:
+        sys.exit(exit_break)
+        
+    elif sys.argv[1] in ['1','2','3'] and sys.argv[2] in tree_mods and sys.argv[3] in label_updates:            
+        tree_mod = str(sys.argv[2])
+        label_update = str(sys.argv[3])
+        
+        if tree_mod == 'rf':
+            
+            if len(sys.argv) == 5 and sys.argv[4] in props:
+                prop = str(sys.argv[4])
+                print('Running pipeline %s (%s) with %s (p=%s) %s label updates.' % (str(pipeline),
+                                                                                       pipelines[pipeline-1],
+                                                                                       tree_mod,
+                                                                                       prop,
+                                                                                       label_update))
+            else:
+                sys.exit("\nMust specify a proportion if model is rf.\n")
+
+        if tree_mod == 'tree':
+            print('Running pipeline %s (%s) with %s %s label updates.' % (str(pipeline),
+                                                                          pipelines[pipeline-1],
+                                                                          tree_mod,
+                                                                          label_update))
+        
+    else:
+        sys.exit(exit_break)
+else:
+    sys.exit(exit_break)
+    
+    
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+print("\n\nNumber of devices: %s.\n \
+    Device set to %s.\n\n" % (torch.cuda.device_count(),device))
+
 
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
 data_dir = os.path.join(work_dir,'data')
@@ -136,11 +193,9 @@ out_dir = os.path.join(work_dir,'out')
 
 if no_punc:
     tbl_fn = 'tbl_to_python_231205.csv.gz'
-    tbl_tree_fn = 'tbl_to_python_231205_count_del.csv.gz'
     print('Fitting model without punctuation.')
 else:
-    tbl_fn = 'tbl_to_python_231229.csv.gz'
-    tbl_tree_fn = 'tbl_to_python_231229_count_del.csv.gz'
+    tbl_fn = 'tbl_to_python_updated.csv.gz'
     out_dir = os.path.join(out_dir,'punc')
     print('Fitting model with punctuation.')
 
@@ -154,21 +209,28 @@ model_token_pretrain = os.path.join(pretrain_dir,'model_token_pretrain')
 
 out_token = os.path.join(token_dir,'custom_tokenizer.json')
 
-if update_labels == 1:
-    if subchapter:
-        finetune_dir = os.path.join(finetune_dir,'updated_labels_subchapter')
-        tbl_tree_fn = re.sub('count_del.csv.gz','count_del_subchapter.csv.gz',tbl_tree_fn)
-        print('Updating to Subchapter tree labels.')
-    else:
-        finetune_dir = os.path.join(finetune_dir,'updated_labels')
-        print('Updating to ICD tree labels.')
-    dat = read_data(os.path.join(data_dir,tbl_tree_fn))
-if update_labels == 0:
-    dat = read_data(os.path.join(data_dir,tbl_fn))
+if label_update != 'none':
+    finetune_dir = os.path.join(finetune_dir,'updated_labels',tree_mod,label_update)
+    tbl_fn_suffix = '_count_del_' + tree_mod + '_' + label_update + '.csv.gz'
+    tbl_fn = re.sub('.csv.gz',tbl_fn_suffix,tbl_fn)
+    if tree_mod == 'rf':
+        finetune_dir = os.path.join(finetune_dir,prop)
+        tbl_fn = re.sub(tree_mod, tree_mod + prop,tbl_fn)
     
+print('\nModel output filename:\n%s' % tbl_fn)    
+    
+dat = read_data(os.path.join(data_dir,tbl_fn))
+
 out_finetune = os.path.join(finetune_dir,'final_model_finetune')
 out_pretrain_finetune = os.path.join(finetune_dir,'final_model_pretrain_finetune')
 out_token_pretrain_finetune = os.path.join(finetune_dir,'final_model_token_pretrain_finetune')
+
+d_val = Dataset.from_dict(dat['val'])
+d_test_haobo = Dataset.from_dict(dat['test_haobo'])
+d_test_icd = Dataset.from_dict(dat['test_icd'])
+
+d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_treeheldout.csv.gz'))
+d_heldout = Dataset.from_dict(d_heldout['test_haobo'])
 
 if pipeline == 1: # finetune with repo model
     mod = os.path.join(out_finetune,'model')
@@ -187,7 +249,10 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
-    
+
+print('\nModel output directory:\n%s' % out_dir) 
+
+
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
 conf.hidden_dropout_prob=0.1
@@ -208,16 +273,13 @@ def tokenize_dataset(data):
         return_special_tokens_mask=True,
     )
 
-d_val = Dataset.from_dict(dat['val'])
-d_test_haobo = Dataset.from_dict(dat['test_haobo'])
-d_test_icd = Dataset.from_dict(dat['test_icd'])
-
 print('Tokenizing validation data.')
 d_val = d_val.map(tokenize_dataset,batched=True,num_proc=16)
 print('Tokenizing testing data.')
 d_test_haoboset_hpihc = d_test_haobo.map(tokenize_dataset,batched=True,num_proc=16)
 d_test_icdset_hpihc = d_test_icd.map(tokenize_dataset,batched=True,num_proc=16)
 d_test_haobolabels_hpihc = d_test_haobo.remove_columns('labels').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
+d_heldout_haobolabels_hpihc = d_heldout.remove_columns('labels').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
 
 def compute_metrics2(eval_pred):
     logits, labels = eval_pred
@@ -241,6 +303,9 @@ print([d_test_icd['labels'].count(0),d_test_icd['labels'].count(1)])
 
 print('Testing Haobo groups.')
 print([d_test_haobo['labels'].count(0),d_test_haobo['labels'].count(1)])
+
+print('Testing Heldout groups.')
+print([d_heldout_haobolabels_hpihc['labels'].count(0),d_heldout_haobolabels_hpihc['labels'].count(1)])
 
 class cTrainer(Trainer):
     pass
@@ -272,12 +337,19 @@ y_test = trainer.predict(d_test_haobolabels_hpihc)
 test_results['haobolabels_hpihc'] = y_test
 print(y_test[2])
 
-pl = pipeline("text-classification", model, tokenizer)
-print(pl('Testing this out on a very scared old lady.'))
-#fill_masker= FillMaskPipeline(model=model.to('cpu'), tokenizer=tokenizer)
+print('Testing Heldout Haobo labels, HPI-HC.')
+y_test = trainer.predict(d_heldout_haobolabels_hpihc)
+test_results['heldout'] = y_test
+print(y_test[2])
 
-#sentence1 = "Patient had significant GERD and was scheduled for a <mask> fundoplication procedure."
-#sentence2 = "Patient was transferred from brigham and womens hospital and admitted to beth <mask> deaconess."
+pl = pipeline("text-classification", model=model, tokenizer=tokenizer)
 
-#print(fill_masker(sentence1))
-#print(fill_masker(sentence2))
+print(pl('This frail old lady came in confused. Ended up needing to be oriented \
+to place given her confusion. This happened after surgery.'))
+
+print(pl('This lady has alzheimers. She otherwise is healthy and at her baseline \
+is aoxtwo. After her surgery, she became aoxzero. She was discharged a few \
+days later once she returned to baseline.'))
+
+print(pl('This lady has alzheimers. She otherwise is healthy and at her baseline \
+is aoxtwo. After her surgery, she was still aoxtwo. She was discharged that day.'))
