@@ -6,6 +6,10 @@ library(vip)
 library(rpart.plot)
 library(ranger)
 
+all_cores <- parallel::detectCores(logical = FALSE)
+cl <- makePSOCKcluster(all_cores)
+registerDoParallel(cl)
+
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
 }
@@ -45,12 +49,12 @@ for (mod in mods){
       last_fit(tree_fit$split) %>%
       extract_workflow()
     
-    features <- tree_fit$data %>% select(-id,-label) %>% colnames()
+    features <- tree_fit$data %>% colnames()
     
     haobo_pred <- haobo_post %>%
-      select(id,label,contains(features)) %>%
       mutate(across(everything(), ~replace_na(.x, 0))) %>%
       mutate(label=as.factor(label))
+    haobo_post <- haobo_post[,features]
     
     ids <- haobo_pred %>% select(id)
     haobo_pred <- haobo_pred %>% select(-id)
@@ -74,3 +78,5 @@ for (mod in mods){
     
   }
 }
+
+stopCluster(cl)

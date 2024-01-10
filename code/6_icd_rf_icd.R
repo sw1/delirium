@@ -132,7 +132,7 @@ tree_spec <- rand_forest(
   trees = tune(),
   min_n = tune()
 ) %>%
-  set_engine("ranger",model=TRUE) %>%
+  set_engine("ranger") %>%
   set_mode("classification")
 
 tuner <- grid_regular(mtry(c(round(sqrt(ncol(d_train))),
