@@ -25,6 +25,7 @@ m <- 'f_meas'
 thresholds <- c(0.7,0.6)
 tol <- 10
 tol_stop <- 2
+n_iter <- 10
 
 id_haobo <- read_csv(
   file.path(path,'to_python','tbl_to_python_updated.csv.gz')) %>%
@@ -108,7 +109,8 @@ for (ss in subsets){
                   table(haobo_pred$label)[1],table(haobo_pred$label)[2]))
       
       ids <- haobo_pred %>% select(id)
-      haobo_pred <- haobo_pred %>% select(-id) %>% mutate(label=as.factor(label))
+      haobo_pred <- haobo_pred %>% select(-id) %>% 
+        mutate(label=as.factor(label))
       
       rf <- tree_spec %>%
         fit(label ~ ., data = haobo_pred)
