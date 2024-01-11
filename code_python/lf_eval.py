@@ -235,19 +235,22 @@ d_heldout = Dataset.from_dict(d_heldout['test_haobo'])
 if pipeline == 1: # finetune with repo model
     mod = os.path.join(out_finetune,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
-    model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    model1 = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
 elif pipeline == 2: # finetune with pretrained model
     mod = os.path.join(out_pretrain_finetune,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
-    model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    model1 = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
 elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     mod = os.path.join(out_token_pretrain_finetune,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
-    model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    model1 = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
 
 print('\nModel output directory:\n%s' % out_dir) 
@@ -311,7 +314,7 @@ class cTrainer(Trainer):
     pass
     
 trainer = cTrainer(
-    model=model.to(device),
+    model=model1.to(device),
     eval_dataset=d_val,
     tokenizer=tokenizer,
     compute_metrics=compute_metrics2
@@ -338,18 +341,22 @@ test_results['haobolabels_hpihc'] = y_test
 print(y_test[2])
 
 print('Testing Heldout Haobo labels, HPI-HC.')
-y_test = trainer.predict(d_heldout_haobolabels_hpihc)
-test_results['heldout'] = y_test
-print(y_test[2])
 
-pl = pipeline("text-classification", model=model, tokenizer=tokenizer)
 
-print(pl('This frail old lady came in confused. Ended up needing to be oriented \
+pl1 = TextClassificationPipeline(model=model1.to('cpu'),tokenizer=tokenizer)
+pl2 = FillMaskPipeline(model2.to('cpu'),tokenizer=tokenizer)
+
+print(pl1('This frail old lady came in confused. Ended up needing to be oriented \
 to place given her confusion. This happened after surgery.'))
 
-print(pl('This lady has alzheimers. She otherwise is healthy and at her baseline \
+print(pl1('This lady has alzheimers. She otherwise is healthy and at her baseline \
 is aoxtwo. After her surgery, she became aoxzero. She was discharged a few \
 days later once she returned to baseline.'))
 
-print(pl('This lady has alzheimers. She otherwise is healthy and at her baseline \
+print(pl1('This lady has alzheimers. She otherwise is healthy and at her baseline \
 is aoxtwo. After her surgery, she was still aoxtwo. She was discharged that day.'))
+
+print(pl2("Patient had significant GERD and was scheduled for a <mask> \
+fundoplication procedure."))
+print(pl2("Patient was transferred from brigham and womens hospital and \
+admitted to beth <mask> deaconess."))

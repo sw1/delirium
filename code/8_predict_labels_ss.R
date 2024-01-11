@@ -22,7 +22,7 @@ mod <- 'rf'
 subsets <- c('icd','sub_chapter','major') 
 
 m <- 'f_meas'
-thresholds <- c(0.7,0.6)
+thresholds <- c(0.8,0.7,0.6)
 tol <- 10
 tol_stop <- 2
 n_iter <- 10
@@ -113,8 +113,23 @@ for (ss in subsets){
       haobo_pred <- haobo_pred %>% select(-id) %>% 
         mutate(label=as.factor(label))
       
+      # upsample smaller class
+      set.seed(12)
+      n_upsamp <- round(sum(haobo_pred$label == 0)/sum(haobo_pred$label == 1))
+      haobo_train <- tibble()
+      for (i in 1:n_upsamp){
+        haobo_train <- haobo_train %>%
+          bind_rows(haobo_pred %>%
+                      group_by(label) %>%
+                      sample_n(sum(haobo_pred$label == 1),replace=TRUE) %>%
+                      ungroup()) 
+      }
+      
+      cat(sprintf('\n\nLabels after upsampling\n0: %s \n1: %s\n\n',
+                  table(haobo_train$label)[1],table(haobo_train$label)[2]))
+      
       rf <- tree_spec %>%
-        fit(label ~ ., data = haobo_pred)
+        fit(label ~ ., data = haobo_train)
       
       ids <- haobo_post %>% select(id)
       haobo_pred <- haobo_post %>% select(-id)
@@ -124,28 +139,49 @@ for (ss in subsets){
       r <- r + 1
       
       if (r == n_iter || tol_counter == tol_stop){
-        haobo_pred <- preds %>%
+  
+        cat('\n\nEnding optimizing early per tolerance.\n')
+        cat('Saving filtered data.\n\n')
+        
+        haobo_out <- preds %>%
           bind_cols(ids) %>%
           left_join(id_haobo,by='id') %>%
           mutate(label=case_when(
             !is.na(label) ~ label,
             .pred_1 >= thres ~ 1,
-            TRUE ~ 0
+            .pred_0 >= thres ~ 0,
+            TRUE ~ NA
           )) %>%
-          select(id,label)
+          select(id,label) %>% 
+          filter(!is.na(label))
         
-        cat(sprintf('\n\nFinal labels\n0: %s \n1: %s\n\n',
-                    table(haobo_pred$label)[1],table(haobo_pred$label)[2]))
+        write_csv(haobo_out,
+                  file.path(path,'data_in',
+                            sprintf('labels_rfst%s_count_del_%s_filt.csv.gz',
+                                    thres*100,ss)),
+                  col_names=TRUE)
         
         break
       }
       tol_0 <- tol_1
     }
-      
-      
-    write_csv(haobo_pred,file.path(path,'data_in',
-                               sprintf('labels_rfst%s_count_del_%s.csv.gz',
-                                       thres*100,ss)),
+    
+    cat('Saving full data data.\n\n')
+    
+    haobo_out <- preds %>%
+      bind_cols(ids) %>%
+      left_join(id_haobo,by='id') %>%
+      mutate(label=case_when(
+        !is.na(label) ~ label,
+        .pred_1 >= thres ~ 1,
+        TRUE ~ 0
+      )) %>%
+      select(id,label)
+    
+    write_csv(haobo_out,
+              file.path(path,'data_in',
+                        sprintf('labels_rfst%s_count_del_%s_full.csv.gz',
+                                thres*100,ss)),
               col_names=TRUE)
   }
 }

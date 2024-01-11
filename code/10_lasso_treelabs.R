@@ -5,7 +5,13 @@ library(tidyverse)
 library(doParallel)
 library(caret)
 
-path <- 'D:\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+}
+
 source(file.path(path,'code','fxns.R'))
 
 sets <- c('baseline','sub_chapter','major','icd')
@@ -18,8 +24,13 @@ for (s in sets){
     dat <- read_csv(file.path(path,'to_python',
                               sprintf('tbl_to_python_updated_count_del_%s.csv.gz',s))) 
   }
+  dat_expert <- read_csv(file.path(path,'to_python',
+                                   'tbl_to_python_updated_treeheldout.csv.gz'))
   
   dat <- dat %>%
+    select(id,text=hpi_hc,label_h=label,label=label_icd,set)
+  
+  dat_expert <- dat_expert %>%
     select(id,text=hpi_hc,label_h=label,label=label_icd,set)
 
   tbls <- list(
@@ -34,7 +45,10 @@ for (s in sets){
       select(id,text,label), 
     test_haobo_hpihc = dat %>% 
       filter(set == 'test_haobo') %>%
-      select(id,text,label=label_h) 
+      select(id,text,label=label_h), 
+    heldout = dat_expert %>%
+      filter(set == 'test_haobo') %>%
+      select(id,text,label)
   )
   
   if (s != 'baseline'){
@@ -104,7 +118,9 @@ for (s in sets){
     y_hat <- predict(fit,newx=x_test,s=fit$lambda.1se,type='class')
     
     cat(sprintf('\nTable %s.\n\n',tb_names[i]))
-    print(confusionMatrix(table(y_test,y_hat)))
+    print(confusionMatrix(table(y_test,y_hat),
+                          reference='y_test',
+                          mode='everything',positive='1'))
   }
 }
 
