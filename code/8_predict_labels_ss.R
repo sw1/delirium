@@ -6,7 +6,6 @@ library(ranger)
 all_cores <- parallel::detectCores(logical = FALSE)
 cl <- makePSOCKcluster(all_cores)
 registerDoParallel(cl)
-# clusterEvalQ(cl,.libPaths("C:/Users/sw1/AppData/Local/R/win-library/4.3"))
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -17,13 +16,13 @@ if (Sys.info()['login'] == 'sw424'){
 source(file.path(path,'code','fxns.R'))
 
 mod <- 'rf'
-subsets <- c('icd','sub_chapter','major')[1:2] # turn this off too 
+subsets <- c('icd','sub_chapter','major')
 
 m <- 'f_meas'
-thresholds <- c(0.9,0.8,0.7)[1:2] #turning others off to do 0.8 alone
+thresholds <- c(0.9,0.8,0.7)
 tol <- 10
 tol_stop <- 2
-n_iter <- 2 #10
+n_iter <- 10
 
 id_haobo <- read_csv(
   file.path(path,'to_python','tbl_to_python_updated.csv.gz')) %>%
@@ -58,7 +57,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',
     best_tree <- tree_fit$fit %>% 
       select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
     
-    p_trees <- 50 #best_tree$trees # set to 50 for now for speed 
+    p_trees <- best_tree$trees 
     p_min_n <- best_tree$min_n
     p_mtry <- best_tree$mtry
     
@@ -156,7 +155,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',
       )) %>%
       select(id,label) 
     
-    return(haobo_out)
+    return(list(haobo_out))
     
 }
 
