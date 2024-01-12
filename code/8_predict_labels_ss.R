@@ -1,14 +1,12 @@
 library(tidymodels)
-library(glmnet)
 library(tidyverse)
 library(doParallel)
-library(vip)
-library(rpart.plot)
 library(ranger)
 
-all_cores <- parallel::detectCores(logical = TRUE)
+all_cores <- parallel::detectCores(logical = FALSE)
 cl <- makePSOCKcluster(all_cores)
 registerDoParallel(cl)
+# clusterEvalQ(cl,.libPaths("C:/Users/sw1/AppData/Local/R/win-library/4.3"))
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -19,22 +17,28 @@ if (Sys.info()['login'] == 'sw424'){
 source(file.path(path,'code','fxns.R'))
 
 mod <- 'rf'
-subsets <- c('icd','sub_chapter','major') 
+subsets <- c('icd','sub_chapter','major')[1:2] # turn this off too 
 
 m <- 'f_meas'
-thresholds <- c(0.8,0.7,0.6)
+thresholds <- c(0.9,0.8,0.7)[1:2] #turning others off to do 0.8 alone
 tol <- 10
 tol_stop <- 2
-n_iter <- 10
+n_iter <- 2 #10
 
 id_haobo <- read_csv(
   file.path(path,'to_python','tbl_to_python_updated.csv.gz')) %>%
   filter(set == 'test_haobo') %>%
   select(id,label)
 
-for (ss in subsets){
-  for (thres in thresholds){
-    
+combs <- crossing(subsets, thresholds) 
+
+set.seed(10)
+out <- foreach(i=1:nrow(combs),.combine='c',
+               .packages=c('tidymodels','tidyverse','ranger')) %dopar% {
+  
+    ss <- combs$subsets[i]
+    thres <- combs$thresholds[i]
+        
     cat(sprintf('\n\nRunning self training for %s %s.\n\n',ss,thres))
     
     tree_fit <- read_rds(
@@ -54,7 +58,7 @@ for (ss in subsets){
     best_tree <- tree_fit$fit %>% 
       select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
     
-    p_trees <- best_tree$trees # set to 50 for now for speed 
+    p_trees <- 50 #best_tree$trees # set to 50 for now for speed 
     p_min_n <- best_tree$min_n
     p_mtry <- best_tree$mtry
     
@@ -74,14 +78,13 @@ for (ss in subsets){
       trees = p_trees,
       min_n = p_min_n
     ) %>%
-      set_engine("ranger",num.threads=all_cores,verbose=TRUE) %>%
+      set_engine("ranger",verbose=TRUE) %>%
       set_mode("classification")
-    # could consider adding regularization but it disables multithreading
     
     set.seed(7)
     r <- 0
     n_pred <- 0
-    tol_0 <- Inf
+    tol_0 <- 0
     tol_counter <- 0
     while (n_pred < nrow(haobo_post)){
      
@@ -100,7 +103,7 @@ for (ss in subsets){
       
       n_pred <- nrow(haobo_pred)
       tol_1 <- n_pred
-      tol_diff <- tol_0 - tol_1
+      tol_diff <- tol_1 - tol_0
       if (tol_diff < tol) tol_counter <- tol_counter + 1
       
       cat(sprintf('\n\nDim pred %s, dim full %s, r=%s.\n\n',
@@ -113,19 +116,14 @@ for (ss in subsets){
       haobo_pred <- haobo_pred %>% select(-id) %>% 
         mutate(label=as.factor(label))
       
-      # upsample smaller class
+      # downsampling since upsampling is too memory and time demanding
       set.seed(12)
-      n_upsamp <- round(sum(haobo_pred$label == 0)/sum(haobo_pred$label == 1))
-      haobo_train <- tibble()
-      for (i in 1:n_upsamp){
-        haobo_train <- haobo_train %>%
-          bind_rows(haobo_pred %>%
-                      group_by(label) %>%
-                      sample_n(sum(haobo_pred$label == 1),replace=TRUE) %>%
-                      ungroup()) 
-      }
-      
-      cat(sprintf('\n\nLabels after upsampling\n0: %s \n1: %s\n\n',
+      haobo_train <- haobo_pred %>%
+        group_by(label) %>%
+        sample_n(sum(haobo_pred$label == 1)) %>%
+        ungroup()
+    
+      cat(sprintf('\n\nLabels after downsampling\n0: %s \n1: %s\n\n',
                   table(haobo_train$label)[1],table(haobo_train$label)[2]))
       
       rf <- tree_spec %>%
@@ -141,32 +139,11 @@ for (ss in subsets){
       if (r == n_iter || tol_counter == tol_stop){
   
         cat('\n\nEnding optimizing early per tolerance.\n')
-        cat('Saving filtered data.\n\n')
-        
-        haobo_out <- preds %>%
-          bind_cols(ids) %>%
-          left_join(id_haobo,by='id') %>%
-          mutate(label=case_when(
-            !is.na(label) ~ label,
-            .pred_1 >= thres ~ 1,
-            .pred_0 >= thres ~ 0,
-            TRUE ~ NA
-          )) %>%
-          select(id,label) %>% 
-          filter(!is.na(label))
-        
-        write_csv(haobo_out,
-                  file.path(path,'data_in',
-                            sprintf('labels_rfst%s_count_del_%s_filt.csv.gz',
-                                    thres*100,ss)),
-                  col_names=TRUE)
         
         break
       }
       tol_0 <- tol_1
     }
-    
-    cat('Saving full data data.\n\n')
     
     haobo_out <- preds %>%
       bind_cols(ids) %>%
@@ -174,16 +151,28 @@ for (ss in subsets){
       mutate(label=case_when(
         !is.na(label) ~ label,
         .pred_1 >= thres ~ 1,
-        TRUE ~ 0
+        .pred_0 >= thres ~ 0,
+        TRUE ~ NA
       )) %>%
-      select(id,label)
+      select(id,label) 
     
-    write_csv(haobo_out,
-              file.path(path,'data_in',
-                        sprintf('labels_rfst%s_count_del_%s_full.csv.gz',
-                                thres*100,ss)),
-              col_names=TRUE)
-  }
+    return(haobo_out)
+    
 }
 
 stopCluster(cl)
+
+for (i in seq_along(out)){
+  write_csv(out[[i]] %>% filter(!is.na(label)),
+            file.path(path,'data_in',
+                      sprintf('labels_rfst%s_count_del_%s_filt.csv.gz',
+                              thres*100,ss)),
+            col_names=TRUE)
+  
+  write_csv(out[[i]] %>% mutate(label=if_else(!is.na(label),0,label)),
+            file.path(path,'data_in',
+                      sprintf('labels_rfst%s_count_del_%s_full.csv.gz',
+                              thres*100,ss)),
+            col_names=TRUE)
+}
+
