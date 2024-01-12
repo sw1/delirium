@@ -165,13 +165,13 @@ for (i in seq_along(out)){
   write_csv(out[[i]] %>% filter(!is.na(label)),
             file.path(path,'data_in',
                       sprintf('labels_rfst%s_count_del_%s_filt.csv.gz',
-                              thres*100,ss)),
+                              combs[i,]$thresholds*100,combs[i,]$subsets)),
             col_names=TRUE)
   
-  write_csv(out[[i]] %>% mutate(label=if_else(!is.na(label),0,label)),
+  write_csv(out[[i]] %>% mutate(label=if_else(is.na(label),0,label)),
             file.path(path,'data_in',
                       sprintf('labels_rfst%s_count_del_%s_full.csv.gz',
-                              thres*100,ss)),
+                              combs[i,]$thresholds*100,combs[i,]$subsets)),
             col_names=TRUE)
 }
 
