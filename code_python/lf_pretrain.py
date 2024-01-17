@@ -114,10 +114,10 @@ os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
 
 s1 = 1234 
 seq_len = 4096
-#pipeline = 2 # 1=finetune, 2=pretrain->finetune, 3=tokenize->pretrain->finetune
 checkpoint = False
 cp = 'checkpoint-50000'
 n_epochs_cp = 2
+n_epochs = 5
 no_punc = False
 
 pipelines = ('pretrain repo model',
@@ -158,15 +158,18 @@ d_train = Dataset.from_dict(dat['train']).remove_columns(['id','hpi','labels','i
 #d_val = Dataset.from_dict(dat['val']).remove_columns(['id','hpi','labels','icd_sum','labels_h'])
 
 mod = 'yikuan8/Clinical-Longformer'  
+tokenizer = AutoTokenizer.from_pretrained(mod,fast=True)
 
 if pipeline == 1: # pretrain with repo model
-    tokenizer = AutoTokenizer.from_pretrained(mod)
     out_dir = out_pretrain
-elif pipeline == 2: # pretrain with custom tokenizer
+if pipeline == 2: # pretrain with custom tokenizer
     #tokenizer = Tokenizer.from_file(out_token)
     #tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer)
     #tokenizer.add_special_tokens({'pad_token':'[PAD]','unk_token':'[UNK]','mask_token':'[MASK]'})
-    tokenizer = AutoTokenizer.from_pretrained(token_dir)
+    tokenizer_update = AutoTokenizer.from_pretrained(token_dir,fast=True)
+    new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
+    tokenizer.add_tokens(new_tokens)
+    print('Length of updated tokenizer: %s' % len(tokenizer))
     out_dir = out_token_pretrain
 
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
@@ -180,15 +183,19 @@ if checkpoint:
 else:
     conf = AutoConfig.from_pretrained(mod,gradient_checkpointing=False)
     model = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
-    n_epochs = 5
+    
+if pipeline == 2:
+    print("Length of trained tokenizer: %s" % len(tokenizer))
+    dim1 = str(model.get_input_embeddings())
+    model.resize_token_embeddings(len(tokenizer))
+    dim2 = str(model.get_input_embeddings())
+    print("Resizing model embedding layer from %s to %s." % (dim1,dim2))
 
-d_train = d_train.train_test_split(test_size=0.1,shuffle=True,seed=123)
+d_train = d_train.train_test_split(test_size=0.05,shuffle=True,seed=323)
 d_train = DatasetDict({
     'train': d_train['train'],
     'val': d_train['test']}
 )
-
-print(d_train)
 
 def tokenize_function(data):
 
@@ -203,6 +210,33 @@ def tokenize_function(data):
         max_length=seq_len,
         return_special_tokens_mask=True,
     )
+    
+def tokenize_function2(data):
+  seqs = []
+  for line in data['text']:
+    if len(line) > seq_len:
+      start = 0
+      subseqs = []
+      while True
+        end = line[start:end].rfind(" ")
+        subseq = line[start,end]
+        if len(subseq) > 0 and not line.isspace():
+          subseqs.append(subseq)
+        start = end + 1
+        end = start + seq_len
+        if len(subseq) < seq_len:
+          seqs = seqs + subseqs
+          break
+    elif len(line) > 0 and not line.isspace():
+      seqs.append(line)
+    
+  return tokenizer(
+    seqs,
+    padding='max_length',
+    truncation=True,
+    max_length=seq_len,
+    return_special_tokens_mask=True,
+  )
 
 d_train = d_train.map(tokenize_function,
                       batched=True,
@@ -210,7 +244,6 @@ d_train = d_train.map(tokenize_function,
                       remove_columns=['text'])
             
 print(d_train)
-print(len(d_train['val']['input_ids'][0]))
 
 data_collator = DataCollatorForLanguageModeling(
     tokenizer=tokenizer, mlm=True, mlm_probability=0.15
@@ -234,7 +267,7 @@ training_args = TrainingArguments(
     
     warmup_steps=10000,
     evaluation_strategy='steps',
-    eval_steps=5000,
+    eval_steps=10000,
     
     load_best_model_at_end=True,
     
@@ -245,15 +278,14 @@ training_args = TrainingArguments(
     
     optim='adamw_torch', #'adafactor',
     gradient_checkpointing=False,
-    fp16=True,
+    fp16=False,
     auto_find_batch_size=True,
     dataloader_num_workers=16, 
-    #dataloader_num_workers=8,
     #gradient_accumulation_steps=8,    
     per_device_train_batch_size=8,
     #per_device_eval_batch_size=8,
     
-    resume_from_checkpoint = checkpoint,
+    #resume_from_checkpoint = checkpoint,
 )
 
 trainer = Trainer(

@@ -116,7 +116,6 @@ s1 = 1234
 seq_len = 4096
 balance_data = True
 no_punc = False
-label_update = 'subchapter' # 'icd' or 'major' or 'subchapter'
 
 pipelines = ('finetune repo model',
              'finetune pretrained model',
@@ -251,7 +250,16 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     mod = os.path.join(model_token_pretrain,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
-    tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
+    tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
+                                              use_fast=True,max_length=seq_len)
+    tokenizer_update = AutoTokenizer.from_pretrained(token_dir,u
+                                                     se_fast=True,max_length=seq_len)
+    tokenizer.add_tokens(list(tokenizer_update.vocab))
+    print('Length of updated tokenizer: %s' % len(tokenizer))
+    dim1 = str(model.get_input_embeddings())
+    model.resize_token_embeddings(len(tokenizer))
+    dim2 = str(model.get_input_embeddings())
+    print("Resizing model embedding layer from %s to %s." % (dim1,dim2))
     out_dir = out_token_pretrain_finetune
 
 print('\nModel output directory:\n%s' % out_dir) 

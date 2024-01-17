@@ -35,7 +35,9 @@ from tokenizers.models import BPE
 from tokenizers.decoders import BPEDecoder
 from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace, BertPreTokenizer
-from tokenizers.normalizers import BertNormalizer, NFD, StripAccents, Replace, Strip
+from tokenizers.normalizers import (
+    BertNormalizer, NFD, StripAccents, Replace, Strip,
+)
 from tokenizers.processors import TemplateProcessing, RobertaProcessing
 
 from transformers.integrations import *
@@ -121,7 +123,8 @@ os.environ['MASTER_PORT'] = '1111'
 
 s1 = 1234 
 seq_len = 4096
-vocab_len = int(5e4)
+update_vocab_len = int(50000) #int(5e4)
+min_freq = int(10) #10
 no_punc = False
 
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
@@ -146,9 +149,36 @@ d_train = Dataset.from_dict(dat['train']).remove_columns(['id','hpi','labels','i
 
 mod = 'yikuan8/Clinical-Longformer'
 texts = iter([d_train[i]['text'] for i in range(len(d_train))])
+words = ['Nissen','beth','israel','deaconess','brigham','dimock','Spaulding','bidmc',
+         'arbor','shore','plymouth','carney','baptist','auburn','lawrence','cambridge',
+         'haldol','seroquel','aoxtwo','aoxone','aoxthree','aoxzero']
 
-tokenizer = AutoTokenizer.from_pretrained(mod)
-tokenizer = tokenizer.train_new_from_iterator(texts, vocab_size=vocab_len, min_frequency=10,
-                                             show_progress=True)
+tokenizer = AutoTokenizer.from_pretrained(mod,fast=True)
+print('\n\nTesting words prior to training.')
+for w in words:
+    in_out = tokenizer.convert_ids_to_tokens(tokenizer.encode(w))
+    print('%s: %s' % (w,in_out))
+print('\nBottom 50 words.')
+print(sorted(tokenizer.vocab.items(),key=lambda x: x[1])[1000:1050])
+print('\nTop 50 words')
+print(sorted(tokenizer.vocab.items(),key=lambda x: x[1],reverse=True)[:50])
+print('\nVocab length %s.' % len(tokenizer.vocab))
+    
+#tokenizer.normalizer = normalizers.Sequence([NFD(), BertNormalizer(), Strip(), StripAccents()])
+tokenizer_update = tokenizer.train_new_from_iterator(texts,vocab_size=update_vocab_len, 
+                                                     min_frequency=min_freq,
+                                                     show_progress=True)
 
-tokenizer.save_pretrained(token_dir)
+#tokenizer.add_tokens(list(tokenizer_update.vocab))
+
+print('\n\nTesting words after training.')
+for w in words:
+    in_out = tokenizer.convert_ids_to_tokens(tokenizer.encode(w))
+    print('%s: %s' % (w,in_out))
+print('\nBottom 50 words.')
+print(sorted(tokenizer.vocab.items(),key=lambda x: x[1])[1000:1050])
+print('\nTop 50 words')
+print(sorted(tokenizer.vocab.items(),key=lambda x: x[1],reverse=True)[:50])
+print('\nVocab length %s.' % len(tokenizer.vocab))
+
+tokenizer_update.save_pretrained(token_dir)

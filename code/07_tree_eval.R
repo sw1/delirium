@@ -37,7 +37,7 @@ if (mod == 'tree'){
     select_by_pct_loss(metric=m,limit=5,desc(min_n),tree_depth)
 }
 
-tree_fit$fit %>% show_best(m)
+tree_fit$fit %>% show_best(m,n=20)
 best_tree
 
 final_fit <- tree_fit$wf %>% 

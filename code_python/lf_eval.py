@@ -251,10 +251,12 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model1 = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
     model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
-    tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
+    tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
+                                              use_fast=True,max_length=seq_len)
+    tokenizer_update = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
+    tokenizer.add_tokens(list(tokenizer_update.vocab))
 
 print('\nModel output directory:\n%s' % out_dir) 
-
 
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
@@ -341,7 +343,9 @@ test_results['haobolabels_hpihc'] = y_test
 print(y_test[2])
 
 print('Testing Heldout Haobo labels, HPI-HC.')
-
+y_test = trainer.predict(d_heldout_haobolabels_hpihc)
+test_results['heldout'] = y_test
+print(y_test[2])
 
 pl1 = TextClassificationPipeline(model=model1.to('cpu'),tokenizer=tokenizer)
 pl2 = FillMaskPipeline(model2.to('cpu'),tokenizer=tokenizer)
