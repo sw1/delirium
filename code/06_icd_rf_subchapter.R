@@ -51,7 +51,6 @@ for(ss in subsets){
         icd_mat[i,icds[j]] <- icd_mat[i,icds[j]] + 1
       }
     }
-    icd_mat <- icd_mat[,colSums(icd_mat) >= col_filter]
   }else{
     features_icds <- unique(process_features(unlist(haobo$icd_codes)))
     icd_mat <- matrix(0,nrow(haobo),length(features_icds))
@@ -65,6 +64,7 @@ for(ss in subsets){
       }
     }
   }
+  icd_mat <- icd_mat[,colSums(icd_mat) >= col_filter]
   
   haobo <- haobo %>% select(-icd_codes)
   
@@ -80,6 +80,7 @@ for(ss in subsets){
   colnames(service_mat)[
     colnames(service_mat) == 'count_service_obstetrics/gynecology'
   ] <- 'count_service_ob'
+  service_mat <- service_mat[,colSums(service_mat) >= col_filter]
   
   haobo <- haobo %>% 
     select(-service) %>%                             # added 1/2/2024

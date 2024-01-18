@@ -20,8 +20,8 @@ if (Sys.info()['login'] == 'sw424'){
 
 source(file.path(path,'code','fxns.R'))
 
-n_folds <- 2
-n_sweep <- 2
+n_folds <- 10
+n_sweep <- 4
 col_filter <- 10
 m <- 'f_meas'
 
@@ -52,7 +52,6 @@ for(ss in subsets){
         icd_mat[i,icds[j]] <- icd_mat[i,icds[j]] + 1
       }
     }
-    icd_mat <- icd_mat[,colSums(icd_mat) >= col_filter]
   }else{
     features_icds <- unique(process_features(unlist(haobo$icd_codes)))
     icd_mat <- matrix(0,nrow(haobo),length(features_icds))
@@ -66,6 +65,7 @@ for(ss in subsets){
       }
     }
   }
+  icd_mat <- icd_mat[,colSums(icd_mat) >= col_filter]
   
   haobo <- haobo %>% select(-icd_codes)
   
@@ -81,6 +81,7 @@ for(ss in subsets){
   colnames(service_mat)[
     colnames(service_mat) == 'count_service_obstetrics/gynecology'
   ] <- 'count_service_ob'
+  service_mat <- service_mat[,colSums(service_mat) >= col_filter]
   
   haobo <- haobo %>% 
     select(-service) %>%                             # added 1/2/2024
@@ -167,7 +168,7 @@ for(ss in subsets){
               grid=tuner,
               metrics=mets)
   
-  best_tree <- tree_fit$fit %>% 
+  best_tree <-fit %>% 
     select_by_pct_loss(metric=m,limit=5,
                        desc(min_n),desc(mtry),lambda,desc(depth))
   

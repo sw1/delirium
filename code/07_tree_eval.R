@@ -30,7 +30,7 @@ m <- 'f_meas'
 
 if (mod == 'rf'){
   best_tree <- tree_fit$fit %>% 
-    select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
+    select_by_pct_loss(metric=m,limit=5,desc(min_n),desc(mtry))
 }
 if (mod == 'tree'){
   best_tree <- tree_fit$fit %>% 

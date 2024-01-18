@@ -49,7 +49,6 @@ for(ss in subsets){
         icd_mat[i,icds[j]] <- icd_mat[i,icds[j]] + 1
       }
     }
-    icd_mat <- icd_mat[,colSums(icd_mat) >= col_filter]
   }else{
     features_icds <- unique(process_features(unlist(haobo$icd_codes)))
     icd_mat <- matrix(0,nrow(haobo),length(features_icds))
@@ -63,6 +62,7 @@ for(ss in subsets){
       }
     }
   }
+  icd_mat <- icd_mat[,colSums(icd_mat) >= col_filter]
   
   haobo <- haobo %>% select(-icd_codes)
   
@@ -78,6 +78,7 @@ for(ss in subsets){
   colnames(service_mat)[
     colnames(service_mat) == 'count_service_obstetrics/gynecology'
     ] <- 'count_service_ob'
+  service_mat <- service_mat[,colSums(service_mat) >= col_filter]
   
   haobo <- haobo %>% 
     select(-service) %>%                
@@ -115,6 +116,19 @@ for(ss in subsets){
     haobo_test <- haobo %>%
       right_join(ids_test,by='id')
   }
+  
+  # upsample smaller class
+  set.seed(12)
+  n_upsamp <- round(sum(haobo$label == 1)/sum(haobo$label == 0))
+  haobo_train <- tibble()
+  for (i in 1:n_upsamp){
+    haobo_train <- haobo_train %>%
+      bind_rows(haobo %>%
+                  group_by(label) %>%
+                  sample_n(sum(haobo$label == 0),replace=TRUE) %>%
+                  ungroup()) 
+  }
+  
   
   haobo_pre <- haobo_train %>% 
     bind_rows(haobo_test) %>%

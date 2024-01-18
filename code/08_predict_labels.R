@@ -18,11 +18,12 @@ if (Sys.info()['login'] == 'sw424'){
 }
 source(file.path(path,'code','fxns.R'))
 
-mods <- c('rf','tree')
+mods <- 'rf' #c('rf','tree')
 subsets <- c('icd','sub_chapter','major')
 
 m <- 'f_meas'
 
+set.seed(4523)
 for (mod in mods){
   for (ss in subsets){
     
@@ -30,14 +31,13 @@ for (mod in mods){
       file.path(path,'data_in',
                 sprintf('alldat_preprocessed_for_pred_%s.rds',ss)))
     
-    # change this to have rf and tree
     tree_fit <- read_rds(
       file.path(path,'data_in',
                 sprintf('fit_%s_count_del_%s.rds',mod,ss)))
     
     if (mod == 'rf'){
       best_tree <- tree_fit$fit %>% 
-        select_by_pct_loss(metric=m,limit=5,desc(min_n),trees,desc(mtry))
+        select_by_pct_loss(metric=m,limit=5,desc(min_n),desc(mtry))
     }
     if (mod == 'tree'){
       best_tree <- tree_fit$fit %>% 
@@ -51,14 +51,15 @@ for (mod in mods){
     
     features <- tree_fit$data %>% colnames()
     
+    haobo_post <- haobo_post[,features]
     haobo_pred <- haobo_post %>%
       mutate(across(everything(), ~replace_na(.x, 0))) %>%
       mutate(label=as.factor(label))
-    haobo_post <- haobo_post[,features]
     
     ids <- haobo_pred %>% select(id)
     haobo_pred <- haobo_pred %>% select(-id)
     
+
     if (mod == 'rf'){
       preds <- wf %>%
         predict(haobo_pred,type='prob') %>%

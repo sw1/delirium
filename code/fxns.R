@@ -1,5 +1,7 @@
-create_counts <- function(x){
-  x %>%
+create_counts <- function(x,mem_save=FALSE){
+  
+  cat('\nCreating counts.\n')
+  x <- x %>%
     mutate(los=replace(los,is.infinite(los),NA),
            los=replace(los,is.na(los),mean(los,na.rm=TRUE))) %>%
     mutate(
@@ -37,32 +39,87 @@ create_counts <- function(x){
       count_hep=1*str_count(hc,'hepatit|hepatol|ascit|jaund|cirrh|varices|meld|portal'),
       count_tox=1*str_count(hc,'toxic'),
       count_los=los                          # added 1/2/23
-    ) %>% left_join(read_csv(file.path('D:\\Dropbox\\embeddings\\delirium','data_in','NursingSummariesWithMRN_ID.csv')) %>% 
+    ) 
+  
+  if (!mem_save){
+    cat('Creating nursing counts.\n')
+    x <- x %>% left_join(read_csv(file.path(path,'data_in','NursingSummariesWithMRN_ID.csv')) %>% 
+                           select(date_nurs=note_dt,mrn,note_nurs=note_txt) %>%
+                           mutate(mrn=as.numeric(mrn)),
+                         by='mrn',relationship='many-to-many') %>%
+      mutate(date_nurs=ymd(date_nurs)) %>%
+      rowwise() %>%
+      mutate(note_overlap=if_else(date_nurs >= date_adm && date_nurs <= date_dc,1,0),
+             note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
+      ungroup() %>%
+      group_by(id) %>%
+      mutate(note_nurs=paste(note_nurs,collapse=' '),
+             n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
+      ungroup() %>%
+      select(-note_overlap,-date_nurs) %>%
+      distinct() %>%
+      mutate(
+        count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
+        count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
+        count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
+        count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
+        count_nurse_pysch_med=1*str_count(note_nurs,'haloperidol|haldol|olanz|symbyax|precedex|dexmedet|seroquel|quetiapine'),
+        count_nurse_bp_med=1*str_count(note_nurs,'lithium|lumateper|caplyta|idone|latuda|depakote|abilify|saphris|lamictal|aripipr|lamotrig'),
+        count_nurse_alz_med=1*str_count(note_nurs,'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
+        count_nurse_wd=1*str_count(note_nurs,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
+        count_nurse_jaund=1*str_count(note_nurs,'ascit|jaund|cirrh|varices|meld')
+      ) 
+  }else{
+    cat('Performing memory save.\n')
+    cat('Saving tmp table.\n')
+    write_rds(x,file.path(path,'data_tmp','raw_counts.rds'))
+    
+    x <- x %>% select(id,mrn,date_adm,date_dc) 
+    
+    cat('Clearing memory.\n')
+    gc()
+    
+    cat('Creating nursing counts.\n')
+    x <- x %>% 
+      distinct() %>% 
+      left_join(read_csv(file.path('D:\\Dropbox\\embeddings\\delirium',
+                                   'data_in',
+                                   'NursingSummariesWithMRN_ID.csv')) %>% 
                   select(date_nurs=note_dt,mrn,note_nurs=note_txt) %>%
                   mutate(mrn=as.numeric(mrn)),
                 by='mrn',relationship='many-to-many') %>%
-    mutate(date_nurs=ymd(date_nurs)) %>%
-    rowwise() %>%
-    mutate(note_overlap=if_else(date_nurs >= date_adm && date_nurs <= date_dc,1,0),
-           note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
-    ungroup() %>%
-    group_by(id) %>%
-    mutate(note_nurs=paste(note_nurs,collapse=' '),
-           n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
-    ungroup() %>%
-    select(-note_overlap,-date_nurs) %>%
-    distinct() %>%
-    mutate(
-      count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
-      count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
-      count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
-      count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
-      count_nurse_pysch_med=1*str_count(note_nurs,'haloperidol|haldol|olanz|symbyax|precedex|dexmedet|seroquel|quetiapine'),
-      count_nurse_bp_med=1*str_count(note_nurs,'lithium|lumateper|caplyta|idone|latuda|depakote|abilify|saphris|lamictal|aripipr|lamotrig'),
-      count_nurse_alz_med=1*str_count(note_nurs,'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
-      count_nurse_wd=1*str_count(note_nurs,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
-      count_nurse_jaund=1*str_count(note_nurs,'ascit|jaund|cirrh|varices|meld')
-    ) 
+      mutate(date_nurs=ymd(date_nurs)) %>%
+      rowwise() %>%
+      mutate(note_overlap=if_else(date_nurs >= date_adm && date_nurs <= date_dc,1,0),
+             note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
+      ungroup() %>%
+      group_by(id) %>%
+      mutate(note_nurs=paste(note_nurs,collapse=' '),
+             n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
+      ungroup() %>%
+      select(-note_overlap,-date_nurs) %>%
+      distinct() %>%
+      mutate(
+        count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
+        count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
+        count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
+        count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
+        count_nurse_pysch_med=1*str_count(note_nurs,'haloperidol|haldol|olanz|symbyax|precedex|dexmedet|seroquel|quetiapine'),
+        count_nurse_bp_med=1*str_count(note_nurs,'lithium|lumateper|caplyta|idone|latuda|depakote|abilify|saphris|lamictal|aripipr|lamotrig'),
+        count_nurse_alz_med=1*str_count(note_nurs,'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
+        count_nurse_wd=1*str_count(note_nurs,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
+        count_nurse_jaund=1*str_count(note_nurs,'ascit|jaund|cirrh|varices|meld')
+      )
+    
+    cat('Merging tables.\n')
+    x <- x %>%
+      left_join(read_rds(file.path(path,'data_tmp','raw_counts.rds')),
+                by='id')
+    
+  }
+  
+  return(x)
+  
 }
 
 get_rules <- function(x){
