@@ -2,6 +2,7 @@ library(tidymodels)
 library(tidyverse)
 library(doParallel)
 library(ranger)
+library(glue)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -21,20 +22,16 @@ source(file.path(path,'code','fxns.R'))
 
 mod <- 'rf'
 subsets <- c('icd','sub_chapter','major')
-thresholds <- c(0.95,0.80)
-weights <- c(10,5,2,1)
+thresholds <- c(0.95,0.85,0.70)
+weights <- c(5,2,1)
 m <- 'f_meas'
-tol <- 50
+n_features <- c(20,50)
+tol <- 25
 tol_stop <- 2
 n_iter <- 10
 f_del <- 0.2
 
 id_heldout <- read_csv(file.path(path,'data_out','heldout_tree_set.csv.gz'))
-
-# id_heldout <- read_csv(
-#   file.path(path,'to_python','tbl_to_python_updated_treeheldout.csv.gz')) %>%
-#   filter(set == 'test_haobo') %>%
-#   select(id,label)
 
 id_test <- read_csv(
   file.path(path,'to_python','tbl_to_python_updated.csv.gz')) %>%
@@ -42,20 +39,25 @@ id_test <- read_csv(
   select(id,label) %>%
   anti_join(id_heldout,by='id')
 
-combs <- crossing(thresholds,subsets,weights) %>% 
-  arrange(desc(thresholds),desc(weights),subsets) %>%
+combs <- crossing(thresholds,subsets,weights,n_features) %>% 
+  arrange(desc(thresholds),desc(weights),subsets,desc(n_features)) %>%
   mutate(acc=NA)
 
 set.seed(10)
 out <- foreach(i=1:nrow(combs),.combine='c',
-               .packages=c('tidymodels','tidyverse','ranger')) %dopar% {
+               .packages=c('tidymodels','tidyverse','ranger','glue')) %dopar% {
   
     ss <- combs$subsets[i]
     thres <- combs$thresholds[i]
     w <- combs$weights[i]
+    f <- combs$n_features[i]
         
-    cat(sprintf('\n\nRunning self training for %s, thres %s, w %s.\n\n',
-                ss,thres,w))
+    cat(glue('Running self-training ({i}/{nrow(combs)}):\n',
+             '\tthreshold:{thres}\n',
+             '\tweight: {w}\n',
+             '\tsubset: {ss}\n',
+             '\tfeatures: {f}\n\n
+             '))
     
     tree_fit <- read_rds(
       file.path(path,'data_in',
@@ -64,7 +66,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',
     features <- colnames(tree_fit$data)
     
     features_subset <- tree_fit$features %>% 
-      slice_head(n=50) %>%
+      slice_head(n=f) %>%
       select(Variable) %>%
       unlist()
     
@@ -118,7 +120,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',
       set_engine("ranger",
                  # regularization.factor=best_tree$lambda,
                  # regularization.usedepth=best_tree$depth,
-                 verbose=TRUE,
+                 verbose=FALSE,
                  oob.error=FALSE) %>%
       set_mode("classification")
     
@@ -133,16 +135,33 @@ out <- foreach(i=1:nrow(combs),.combine='c',
     n_pred <- 0
     tol_0 <- 0
     tol_counter <- 0
-    while (n_pred < nrow(haobo_post)){
+    while (TRUE){
      
       haobo_pred <- preds %>%
         bind_cols(ids) %>%
         mutate(label=case_when(
           .pred_1 >= thres ~ 1,
           .pred_0 >= thres ~ 0,
-          TRUE ~ NA
-        ),
-        label=as.factor(label)) %>%
+          TRUE ~ NA))
+      
+      if (sum(is.na(haobo_pred$label)) == 0) {
+        
+        cat(glue('Status ({i}/{nrow(combs)}): all labels predicted\n',
+                 '\tthreshold: {thres}\n',
+                 '\tweight: {w}\n',
+                 '\tsubset: {ss}\n',
+                 '\tfeatures: {f}\n',
+                 '\titer: {r}\n',
+                 '\tlabels predicted 0/1\\
+: {sum(haobo_pred$label == 0,na.rm=TRUE)}/\\
+{sum(haobo_pred$label == 1,na.rm=TRUE)}\n\n
+                 '))
+        
+        break
+      }
+      
+      haobo_pred <- haobo_pred %>%
+        mutate(label=as.factor(label)) %>%
         select(id,label) %>% 
         left_join(haobo_post %>% select(-label),by='id') %>%
         filter(!is.na(label)) %>%
@@ -153,31 +172,29 @@ out <- foreach(i=1:nrow(combs),.combine='c',
       tol_diff <- tol_1 - tol_0
       if (tol_diff < tol) tol_counter <- tol_counter + 1
       
-      cat(sprintf('subset=%s, threshold=%s, imp=%s, r=%s, counter=%s\ndim predicted: %s\ndim full: %s\n',
-                  ss,thres,w,r,tol_counter,nrow(haobo_pred),nrow(haobo_post)))
-      
-      cat(sprintf('Current labels\n0: %s \n1: %s\n\n',
-                  table(haobo_pred$label)[1],table(haobo_pred$label)[2]))
-      
       haobo_pred <- haobo_pred %>% 
         mutate(w=importance_weights(if_else(id %in% id_test$id,w,1))) %>%
         select(-id)
       
+      n_1 <- sum(haobo_pred$label == 1)
+      n_0 <- sum(haobo_pred$label == 0)
+      
       # downsampling since upsampling is too memory and time demanding
-      # n_downsamp <- min(table(haobo_pred$label))
       # haobo_train <- haobo_pred %>%
       #   group_by(label) %>%
-      #   sample_n(n_downsamp,replace=FALSE) %>%
+      #   sample_n(min(c(n_1,n_0)),replace=FALSE) %>%
       #   ungroup()
       
       # upsample smaller class
-      n_upsamp <- round(sum(haobo_pred$label == 1)/sum(haobo_pred$label == 0))
+      n_upsamp_max <- max(c(n_0,n_1))
+      n_upsamp_min <- min(c(n_0,n_1))
+      n_upsamp <- round(n_upsamp_max/n_upsamp_min)
       haobo_train <- tibble()
-      for (i in 1:n_upsamp){
+      for (j in 1:n_upsamp){
         haobo_train <- haobo_train %>%
           bind_rows(haobo_pred %>%
                       group_by(label) %>%
-                      sample_n(sum(haobo_pred$label == 0),replace=TRUE) %>%
+                      sample_n(n_upsamp_min,replace=TRUE) %>%
                       ungroup())
       }
       
@@ -198,7 +215,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',
           fit(haobo_train %>% select(-w))
       }
 
-        # fit(haobo_pred)
+      # fit(haobo_pred)
       
       # rf <- ranger(label ~ ., data=haobo_train,probability=TRUE,
       #              num.tree=p_trees,mtry=p_mtry,min.node.size=p_min_n,
@@ -211,8 +228,19 @@ out <- foreach(i=1:nrow(combs),.combine='c',
       acc_heldout <- mean(preds_heldout$.pred_class == haobo_heldout$label)
       combs$acc[i] <- acc_heldout
       
-      cat(sprintf('\n\nHeldout performance\nsubset=%s, threshold=%s, imp=%s, r=%s, \naccuracy: %s\npredicted 0/1: %s/%s\n',
-                  ss,thres,w,r,acc_heldout,table(preds_heldout$.pred_class)[1],table(preds_heldout$.pred_class)[2]))
+      cat(glue('Status ({i}/{nrow(combs)}):\n',
+               '\tthreshold:{thres}\n',
+               '\tweight: {w}\n',
+               '\tsubset: {ss}\n',
+               '\tfeatures: {f}\n',
+               '\titer: {r}/{n_iter}\n',
+               '\tcounter: {tol_counter}/{tol_stop}\n',
+               '\tdim predicted/full: {n_pred}/{nrow(haobo_post)}\n',
+               '\tlabels predicted 0/1: {n_0}/{n_1}\n',
+               '\taccuracy: {acc_heldout}\n',
+               '\tpredicted 0/1: {table(preds_heldout$.pred_class)[1]}',
+               '/{table(preds_heldout$.pred_class)[2]}\n\n
+               '))
       
       preds <- predict(rf,haobo_pred,type='prob')
       # preds <- predict(rf,haobo_pred)$predictions
@@ -220,35 +248,45 @@ out <- foreach(i=1:nrow(combs),.combine='c',
     
       r <- r + 1
       
-      if (r == n_iter || tol_counter == tol_stop){
-  
-        cat('\n\nEnding optimizing early per tolerance.\n')
+      if (r == n_iter | tol_counter == tol_stop){
+        
+        cat(glue('Status ({i}/{nrow(combs)}): ending optimizing early per t\\
+olerance\n',
+                 '\tthreshold:{thres}\n',
+                 '\tweight: {w}\n',
+                 '\tsubset: {ss}\n',
+                 '\tfeatures: {f}\n',
+                 '\titer: {r}\n',
+                 '\tcounter: {tol_counter}\n\n
+                 '))
+        
+        cat('Generating final predictions\n')
+        
+        haobo_pred <- preds %>%
+          bind_cols(ids) %>%
+          mutate(label=case_when(
+            .pred_1 >= thres ~ 1,
+            .pred_0 >= thres ~ 0,
+            TRUE ~ NA)) 
         
         break
       }
       tol_0 <- tol_1
     }
     
-    haobo_out <- preds %>%
-      bind_cols(ids) %>%
-      mutate(label=case_when(
-        .pred_1 >= thres ~ 1,
-        .pred_0 >= thres ~ 0,
-        TRUE ~ NA
-      )) %>%
+    haobo_out <- haobo_pred %>%
       select(id,label) %>%
+      mutate(label=as.factor(label)) %>%
       bind_rows(haobo_test %>% select(id,label))
     
-    write_csv(haobo_out %>% filter(!is.na(label)),
-              file.path(path,'data_in',
-                        sprintf('labels_rfst%s_%s_count_del_%s_filt.csv.gz',
-                                thres*100,w,ss)),
-              col_names=TRUE)
+    cat('Saving restults\n\n')
     
-    write_csv(haobo_out %>% mutate(label=if_else(is.na(label),0,label)),
+    # do the filter/threshold is next script
+    write_csv(haobo_out,
               file.path(path,'data_in',
-                        sprintf('labels_rfst%s_%s_count_del_%s_full.csv.gz',
-                                thres*100,w,ss)),
+                        sprintf(
+                          'labels_rfst_th%s_w%s_f%s_count_del_%s.csv.gz',
+                                thres*100,w,ss,f)),
               col_names=TRUE)
     
     return(list(haobo_out))
@@ -257,5 +295,5 @@ out <- foreach(i=1:nrow(combs),.combine='c',
 
 stopCluster(cl)
 
-save_rds(list(combs=combs,out=out), file.path(path,'data_tmp',
+write_rds(list(combs=combs,out=out), file.path(path,'data_tmp',
                    sprintf('labels_rfst_count_del_full.rds')))

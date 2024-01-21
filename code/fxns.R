@@ -141,6 +141,28 @@ get_rules <- function(x){
   return(y)
 }
 
+chunk <- function(x,n=4096){
+  n_str <- nchar(x)
+  n_ss <- ceiling(n_str/n)
+  
+  start <- 1
+  end <- n
+  out <- NULL
+  while (length(out) <= n_ss){
+    
+    if (length(out) == (n_ss-1)) return(list(c(out,substr(x,start,n_str))))
+    
+    tmp_ss <- substr(x,start,end)
+    ss_last_space <- tail(str_locate_all(tmp_ss,' ')[[1]],1)[1,1]
+    end <- start + ss_last_space - 2
+    
+    out <- c(out,substr(x,start,end))
+    start <- end + 2
+    end <- start + n
+  }
+}
+
+
 new_var <- function(df,v1,v2){
   df %>% mutate(!!rlang::parse_expr(v1) := !!rlang::parse_expr(v2))
 }

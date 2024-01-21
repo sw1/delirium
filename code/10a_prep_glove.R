@@ -11,7 +11,7 @@ if (Sys.info()['login'] == 'sw424'){
 }
 
 cat('Reading table.\n')
-dat <- read_csv(file.path(path,'to_python','tbl_to_python_updated.csv.gz')) %>%
+dat <- read_csv(file.path(path,'to_python','tbl_to_python_updated_chunked.csv.gz')) %>%
   mutate(hpi_hc=stripWhitespace(trimws(str_replace_all(hpi_hc,'[[:punct:]]',''),'both')))
 
 train <- dat %>% 
