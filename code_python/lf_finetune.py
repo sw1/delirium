@@ -102,6 +102,18 @@ def read_data(fn):
 
     return(d)
 
+def absmax(x):
+    return(x[np.abs(x).argmax()])
+
+def absargmax(x):
+    return(np.abs(x).argmax())
+
+def logit(p):
+    return np.log(p) - np.log(1 - p)
+
+def inv_logit(p):
+    return np.exp(p) / (1 + np.exp(p))
+
 def group_preds(predictions,labels):
     
     N = len(labels)
@@ -111,18 +123,17 @@ def group_preds(predictions,labels):
         idnum = labels[i]
         label = predictions[1][i]
         pred = predictions[0][i].argmax()
+        val = absmax(predictions[0][i])
         
         try:
-            current = res_dict[idnum]['pred'].append(pred)
-            
+            res_dict[idnum]['pred'].append(pred)
+            res_dict[idnum]['val'].append(val)
         except KeyError:
-            res_dict[idnum] = dict()
-            res_dict[idnum]['label'] = label
-            res_dict[idnum]['pred'] = [pred]
+            res_dict[idnum] = {'label':label,'pred':[pred],'val':[val]}
             
     return(res_dict)
 
-def majority_vote(res_dict):
+def majority_vote(res_dict,tiebreaker=None):
     
     maj_dict = {'matches':dict(),
                 'ties':[]}
@@ -143,6 +154,18 @@ def majority_vote(res_dict):
             
             if maj == 0.5:
                 maj_dict['ties'].append(k)
+                
+                if tiebreaker == 'max':
+                    p = res_dict[k]['pred'][absargmax(res_dict[k]['val'])]
+                    maj_dict['matches'][k] = [p,n_str]
+                if tiebreaker == 'mean':
+                    p = inv_logit(res_dict[k]['val']).mean()
+                    if p >= 0.5:
+                        pp = 1
+                    else:
+                        pp = 0
+                    maj_dict['matches'][k] = [pp,n_str]
+                
             else:
                 if maj > 0.5:
                     maj_dict['matches'][k] = [1,n_str]
@@ -150,12 +173,6 @@ def majority_vote(res_dict):
                     maj_dict['matches'][k] = [0,n_str]
 
     return(maj_dict)
-
-def logit(p):
-    return np.log(p) - np.log(1 - p)
-
-def inv_logit(p):
-    return np.exp(p) / (1 + np.exp(p))
 
 os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
@@ -485,11 +502,12 @@ plt.savefig(os.path.join(out_dir,'figure2.png'))
 
 test_results = {}
 if chunked:
+    tiebreaker = 'max'
     
     print('Testing Haobo set, HPI-HC.')
     y_test = trainer.predict(d_test_haoboset_hpihc)
     grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)
@@ -498,7 +516,7 @@ if chunked:
     print('Testing ICD set, HPI-HC.')
     y_test = trainer.predict(d_test_icdset_hpihc)
     grouped = group_preds(y_test,d_test_icd['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)
@@ -507,7 +525,7 @@ if chunked:
     print('Testing Haobo set, HPI only.')
     y_test = trainer.predict(d_test_haoboset_hpi)
     grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)
@@ -516,7 +534,7 @@ if chunked:
     print('Testing ICD set, HPI only.')
     y_test = trainer.predict(d_test_icdset_hpi)
     grouped = group_preds(y_test,d_test_icd['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)
@@ -525,7 +543,7 @@ if chunked:
     print('Testing Haobo labels, HPI-HC.')
     y_test = trainer.predict(d_test_haobolabels_hpihc)
     grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)
@@ -534,7 +552,7 @@ if chunked:
     print('Testing Haobo labels, HPI only.')
     y_test = trainer.predict(d_test_haobolabels_hpi)
     grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)
@@ -543,7 +561,7 @@ if chunked:
     print('Testing Heldout Haobo labels, HPI-HC.')
     y_test = trainer.predict(d_heldout_haobolabels_hpihc)
     grouped = group_preds(y_test,d_heldout['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
     print(acc)

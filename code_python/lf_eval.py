@@ -102,6 +102,18 @@ def read_data(fn):
 
     return(d)
 
+def absmax(x):
+    return(x[np.abs(x).argmax()])
+
+def absargmax(x):
+    return(np.abs(x).argmax())
+
+def logit(p):
+    return np.log(p) - np.log(1 - p)
+
+def inv_logit(p):
+    return np.exp(p) / (1 + np.exp(p))
+
 def group_preds(predictions,labels):
     
     N = len(labels)
@@ -111,18 +123,17 @@ def group_preds(predictions,labels):
         idnum = labels[i]
         label = predictions[1][i]
         pred = predictions[0][i].argmax()
-        
+        val = absmax(predictions[0][i])
+
         try:
-            current = res_dict[idnum]['pred'].append(pred)
-            
+            res_dict[idnum]['pred'].append(pred)
+            res_dict[idnum]['val'].append(val)
         except KeyError:
-            res_dict[idnum] = dict()
-            res_dict[idnum]['label'] = label
-            res_dict[idnum]['pred'] = [pred]
+            res_dict[idnum] = {'label':label,'pred':[pred],'val':[val]}
             
     return(res_dict)
 
-def majority_vote(res_dict):
+def majority_vote(res_dict,tiebreaker=None):
     
     maj_dict = {'matches':dict(),
                 'ties':[]}
@@ -143,6 +154,18 @@ def majority_vote(res_dict):
             
             if maj == 0.5:
                 maj_dict['ties'].append(k)
+                
+                if tiebreaker == 'max':
+                    p = res_dict[k]['pred'][absargmax(res_dict[k]['val'])]
+                    maj_dict['matches'][k] = [p,n_str]
+                if tiebreaker == 'mean':
+                    p = inv_logit(res_dict[k]['val']).mean()
+                    if p >= 0.5:
+                        pp = 1
+                    else:
+                        pp = 0
+                    maj_dict['matches'][k] = [pp,n_str]
+                
             else:
                 if maj > 0.5:
                     maj_dict['matches'][k] = [1,n_str]
@@ -150,13 +173,6 @@ def majority_vote(res_dict):
                     maj_dict['matches'][k] = [0,n_str]
 
     return(maj_dict)
-
-
-def logit(p):
-    return np.log(p) - np.log(1 - p)
-
-def inv_logit(p):
-    return np.exp(p) / (1 + np.exp(p))
 
 os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
@@ -330,42 +346,43 @@ res_eval = trainer.evaluate()
 print(res_eval)
 
 test_results = {}
-
 if chunked:
+    tiebreaker = 'max'
+    
     print('Testing Haobo set, HPI-HC.')
     y_test = trainer.predict(d_test_haoboset_hpihc)
     grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
-    print(acc)
+    print('Accuracy: %s; Ties: %s' % (acc, len(out['ties'])))
     test_results['haoboset_hpihc'] = y_test
 
     print('Testing ICD set, HPI-HC.')
     y_test = trainer.predict(d_test_icdset_hpihc)
     grouped = group_preds(y_test,d_test_icd['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
-    print(acc)
+    print('Accuracy: %s; Ties: %s' % (acc, len(out['ties'])))
     test_results['icdset_hpihc'] = y_test
 
     print('Testing Haobo labels, HPI-HC.')
     y_test = trainer.predict(d_test_haobolabels_hpihc)
     grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
-    print(acc)
+    print('Accuracy: %s; Ties: %s' % (acc, len(out['ties'])))
     test_results['haobolabels_hpihc'] = y_test
 
     print('Testing Heldout Haobo labels, HPI-HC.')
     y_test = trainer.predict(d_heldout_haobolabels_hpihc)
     grouped = group_preds(y_test,d_heldout['id'])
-    out = majority_vote(grouped)
+    out = majority_vote(grouped,tiebreaker)
     acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
     y_test = {'results':out,'accuracy':acc}
-    print(acc)
+    print('Accuracy: %s; Ties: %s' % (acc, len(out['ties'])))
     test_results['heldout'] = y_test
     
 else:
@@ -392,15 +409,24 @@ else:
 pl1 = TextClassificationPipeline(model=model1.to('cpu'),tokenizer=tokenizer)
 pl2 = FillMaskPipeline(model2.to('cpu'),tokenizer=tokenizer)
 
-print(pl1('This frail old lady came in confused. Ended up needing to be oriented \
-to place given her confusion. This happened after surgery.'))
-
-print(pl1('This lady has alzheimers. She otherwise is healthy and at her baseline \
+s1 = 'This frail old lady came in confused. Ended up needing to be oriented \
+to place given her confusion. This happened after surgery.'
+s2 = 'This lady has alzheimers. She otherwise is healthy and at her baseline \
 is aoxtwo. After her surgery, she became aoxzero. She was discharged a few \
-days later once she returned to baseline.'))
+days later once she returned to baseline.'
+s3 = 'This lady has alzheimers. She otherwise is healthy and at her baseline \
+is aoxtwo. After her surgery, she was still aoxtwo. She had no issues during \
+her stay. She slept well throughout the night. She remained afebrile and was \
+eating well and ambulating. She was discharged that day.'
 
-print(pl1('This lady has alzheimers. She otherwise is healthy and at her baseline \
-is aoxtwo. After her surgery, she was still aoxtwo. She was discharged that day.'))
+print(s1)
+print(pl1(s1))
+
+print(s2)
+print(pl1(s2))
+
+print(s3)
+print(pl1(s3))
 
 print(pl2("Patient had significant GERD and was scheduled for a <mask> \
 fundoplication procedure."))
