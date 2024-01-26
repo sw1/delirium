@@ -102,6 +102,56 @@ def read_data(fn):
 
     return(d)
 
+def group_preds(predictions,labels):
+    
+    N = len(labels)
+    res_dict = dict()
+    
+    for i in range(N):
+        idnum = labels[i]
+        label = predictions[1][i]
+        pred = predictions[0][i].argmax()
+        
+        try:
+            current = res_dict[idnum]['pred'].append(pred)
+            
+        except KeyError:
+            res_dict[idnum] = dict()
+            res_dict[idnum]['label'] = label
+            res_dict[idnum]['pred'] = [pred]
+            
+    return(res_dict)
+
+def majority_vote(res_dict):
+    
+    maj_dict = {'matches':dict(),
+                'ties':[]}
+
+    for k,v in res_dict.items():
+        
+        if len(res_dict[k]['pred']) == 1:
+            
+            if res_dict[k]['pred'] == res_dict[k]['label']:
+                maj_dict['matches'][k] = [1,1] 
+            else:
+                maj_dict['matches'][k] = [0,1] 
+        
+        if len(res_dict[k]['pred']) > 1:
+            
+            n_str = len(res_dict[k]['pred'])
+            maj = res_dict[k]['pred'].count(1)/len(res_dict[k]['pred'])
+            
+            if maj == 0.5:
+                maj_dict['ties'].append(k)
+            else:
+                if maj > 0.5:
+                    maj_dict['matches'][k] = [1,n_str]
+                if maj < 0.5:
+                    maj_dict['matches'][k] = [0,n_str]
+
+    return(maj_dict)
+
+
 def logit(p):
     return np.log(p) - np.log(1 - p)
 
@@ -116,106 +166,43 @@ s1 = 1234
 seq_len = 4096
 balance_data = True
 no_punc = False
-label_update = 'subchapter' # 'icd' or 'major' or 'subchapter'
 
 pipelines = ('finetune repo model',
              'finetune pretrained model',
              'finetune pretrained model that used custom tokenizer')
 
-tree_mods = ('rf','tree')
-
-label_updates =  ('icd',
-                 'major',
-                 'sub_chapter')
-
-props = ('50','60','65','70')
-
-exit_break = "\nSpecify a pipeline, model, label update, and, if rf, a proportion (see below):\n\n \
+exit_break = "\nSpecify a pipeline and table filename:\n\n \
         \t pipeline 1: %s\n \
         \t pipeline 2: %s\n \
-        \t pipeline 3: %s\n \
-        \t model %s\n \
-        \t model %s\n \
-        \t label %s\n \
-        \t label %s\n \
-        \t label %s\n \
-        \t proportion %s\n \
-        \t proportion %s\n \
-        \t proportion %s\n \
-        \t proportion %s\n" % (pipelines + tree_mods + label_updates + props)
+        \t pipeline 3: %s\n" % pipelines
 
-if len(sys.argv) > 1:
+if len(sys.argv) == 3 and sys.argv[1] in ['1','2','3']:
     pipeline = int(sys.argv[1]) 
-    label_update = 'none'
-    
-    if len(sys.argv) == 2 and sys.argv[1] in ['1','2','3']:
-        print('Running pipeline %s: %s\n' % (str(pipeline),pipelines[pipeline-1]))
-        
-    elif len(sys.argv) < 4 or len(sys.argv) > 5:
-        sys.exit(exit_break)
-        
-    elif sys.argv[1] in ['1','2','3'] and sys.argv[2] in tree_mods and sys.argv[3] in label_updates:            
-        tree_mod = str(sys.argv[2])
-        label_update = str(sys.argv[3])
-        
-        if tree_mod == 'rf':
-            
-            if len(sys.argv) == 5 and sys.argv[4] in props:
-                prop = str(sys.argv[4])
-                print('Running pipeline %s (%s) with %s (p=%s) %s label updates.' % (str(pipeline),
-                                                                                       pipelines[pipeline-1],
-                                                                                       tree_mod,
-                                                                                       prop,
-                                                                                       label_update))
-            else:
-                sys.exit("\nMust specify a proportion if model is rf.\n")
-
-        if tree_mod == 'tree':
-            print('Running pipeline %s (%s) with %s %s label updates.' % (str(pipeline),
-                                                                          pipelines[pipeline-1],
-                                                                          tree_mod,
-                                                                          label_update))
-        
-    else:
-        sys.exit(exit_break)
+    tbl_fn = sys.argv[2]
+    if 'chunk' in tbl_fn:
+        chunked = True
+    folder_fn = tbl_fn.replace('tbl_to_python_updated_','punc_').replace('.csv.gz','')
 else:
-    sys.exit(exit_break)
+    sys.exit(exit_break) 
     
     
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 print("\n\nNumber of devices: %s.\n \
     Device set to %s.\n\n" % (torch.cuda.device_count(),device))
 
-
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
 data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
 
-if no_punc:
-    tbl_fn = 'tbl_to_python_231205.csv.gz'
-    print('Fitting model without punctuation.')
-else:
-    tbl_fn = 'tbl_to_python_updated.csv.gz'
-    out_dir = os.path.join(out_dir,'punc')
-    print('Fitting model with punctuation.')
-
 token_dir = os.path.join(out_dir,'token')
 pretrain_dir = os.path.join(out_dir,'pretrain')
-finetune_dir = os.path.join(out_dir,'finetune')
+finetune_dir = os.path.join(out_dir,'finetune',folder_fn)
 sweep_dir = os.path.join(out_dir,'sweep')
 
 model_pretrain = os.path.join(pretrain_dir,'model_pretrain')
 model_token_pretrain = os.path.join(pretrain_dir,'model_token_pretrain')
 
 out_token = os.path.join(token_dir,'custom_tokenizer.json')
-
-if label_update != 'none':
-    finetune_dir = os.path.join(finetune_dir,'updated_labels',tree_mod,label_update)
-    tbl_fn_suffix = '_count_del_' + tree_mod + '_' + label_update + '.csv.gz'
-    tbl_fn = re.sub('.csv.gz',tbl_fn_suffix,tbl_fn)
-    if tree_mod == 'rf':
-        finetune_dir = os.path.join(finetune_dir,prop)
-        tbl_fn = re.sub(tree_mod, tree_mod + prop,tbl_fn)
     
 print('\nModel output filename:\n%s' % tbl_fn)    
     
@@ -225,12 +212,19 @@ out_finetune = os.path.join(finetune_dir,'final_model_finetune')
 out_pretrain_finetune = os.path.join(finetune_dir,'final_model_pretrain_finetune')
 out_token_pretrain_finetune = os.path.join(finetune_dir,'final_model_token_pretrain_finetune')
 
+d_train = Dataset.from_dict(dat['train'])
+#d_train = d_train.train_test_split(test_size=0.95,shuffle=True,seed=s1)['train'] #subset data
 d_val = Dataset.from_dict(dat['val'])
 d_test_haobo = Dataset.from_dict(dat['test_haobo'])
 d_test_icd = Dataset.from_dict(dat['test_icd'])
 
-d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_treeheldout.csv.gz'))
+if chunked:
+    d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_chunked_treeheldout.csv.gz'))
+else:
+    d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_treeheldout.csv.gz'))
+    
 d_heldout = Dataset.from_dict(d_heldout['test_haobo'])
+
 
 if pipeline == 1: # finetune with repo model
     mod = os.path.join(out_finetune,'model')
@@ -253,8 +247,17 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
-    tokenizer_update = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
+    tokenizer_update = AutoTokenizer.from_pretrained(token_dir,
+                                                     use_fast=True,max_length=seq_len)
     tokenizer.add_tokens(list(tokenizer_update.vocab))
+    print('Length of updated tokenizer: %s' % len(tokenizer))
+    dim1 = str(model1.get_input_embeddings())
+    model1.resize_token_embeddings(len(tokenizer))
+    model2.resize_token_embeddings(len(tokenizer))
+    dim2 = str(model1.get_input_embeddings())
+    print("Resizing model 1 embedding layer from %s to %s." % (dim1,dim2))
+    dim2 = str(model2.get_input_embeddings())
+    print("Resizing model 2 embedding layer from %s to %s." % (dim1,dim2))
 
 print('\nModel output directory:\n%s' % out_dir) 
 
@@ -327,25 +330,64 @@ res_eval = trainer.evaluate()
 print(res_eval)
 
 test_results = {}
-print('Testing Haobo set, HPI-HC.')
-y_test = trainer.predict(d_test_haoboset_hpihc)
-test_results['haoboset_hpihc'] = y_test
-print(y_test[2])
 
-print('Testing ICD set, HPI-HC.')
-y_test = trainer.predict(d_test_icdset_hpihc)
-test_results['icdset_hpihc'] = y_test
-print(y_test[2])
+if chunked:
+    print('Testing Haobo set, HPI-HC.')
+    y_test = trainer.predict(d_test_haoboset_hpihc)
+    grouped = group_preds(y_test,d_test_haobo['id'])
+    out = majority_vote(grouped)
+    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
+    y_test = {'results':out,'accuracy':acc}
+    print(acc)
+    test_results['haoboset_hpihc'] = y_test
 
-print('Testing Haobo labels, HPI-HC.')
-y_test = trainer.predict(d_test_haobolabels_hpihc)
-test_results['haobolabels_hpihc'] = y_test
-print(y_test[2])
+    print('Testing ICD set, HPI-HC.')
+    y_test = trainer.predict(d_test_icdset_hpihc)
+    grouped = group_preds(y_test,d_test_icd['id'])
+    out = majority_vote(grouped)
+    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
+    y_test = {'results':out,'accuracy':acc}
+    print(acc)
+    test_results['icdset_hpihc'] = y_test
 
-print('Testing Heldout Haobo labels, HPI-HC.')
-y_test = trainer.predict(d_heldout_haobolabels_hpihc)
-test_results['heldout'] = y_test
-print(y_test[2])
+    print('Testing Haobo labels, HPI-HC.')
+    y_test = trainer.predict(d_test_haobolabels_hpihc)
+    grouped = group_preds(y_test,d_test_haobo['id'])
+    out = majority_vote(grouped)
+    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
+    y_test = {'results':out,'accuracy':acc}
+    print(acc)
+    test_results['haobolabels_hpihc'] = y_test
+
+    print('Testing Heldout Haobo labels, HPI-HC.')
+    y_test = trainer.predict(d_heldout_haobolabels_hpihc)
+    grouped = group_preds(y_test,d_heldout['id'])
+    out = majority_vote(grouped)
+    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
+    y_test = {'results':out,'accuracy':acc}
+    print(acc)
+    test_results['heldout'] = y_test
+    
+else:
+    print('Testing Haobo set, HPI-HC.')
+    y_test = trainer.predict(d_test_haoboset_hpihc)
+    test_results['haoboset_hpihc'] = y_test
+    print(y_test[2])
+
+    print('Testing ICD set, HPI-HC.')
+    y_test = trainer.predict(d_test_icdset_hpihc)
+    test_results['icdset_hpihc'] = y_test
+    print(y_test[2])
+
+    print('Testing Haobo labels, HPI-HC.')
+    y_test = trainer.predict(d_test_haobolabels_hpihc)
+    test_results['haobolabels_hpihc'] = y_test
+    print(y_test[2])
+
+    print('Testing Heldout Haobo labels, HPI-HC.')
+    y_test = trainer.predict(d_heldout_haobolabels_hpihc)
+    test_results['heldout'] = y_test
+    print(y_test[2])
 
 pl1 = TextClassificationPipeline(model=model1.to('cpu'),tokenizer=tokenizer)
 pl2 = FillMaskPipeline(model2.to('cpu'),tokenizer=tokenizer)
