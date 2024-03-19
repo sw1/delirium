@@ -141,7 +141,7 @@ get_rules <- function(x){
   return(y)
 }
 
-chunk <- function(x,n=4096){
+chunk_nonoverlap <- function(x,n=4096){
   n_str <- nchar(x)
   n_ss <- ceiling(n_str/n)
   
@@ -161,6 +161,27 @@ chunk <- function(x,n=4096){
     end <- start + n
   }
 }
+
+chunk <- function(x,n=4096){
+  L <- nchar(txt)
+  R <- ceiling(L/n)
+  skip <- floor(L/R)
+  
+  front <- str_trim(substr(txt,1,n))
+  back <- str_trim(substr(txt,L-n+1,L))
+  
+  ss <- c(front,back)
+  
+  for (i in seq_len(R-2)){
+    start <- i * skip
+    end <- start + n - 1
+    ss <- c(ss,str_trim(substr(txt,start,end)))
+  }
+  
+  return(list(ss))
+  
+}
+
 
 
 new_var <- function(df,v1,v2){
