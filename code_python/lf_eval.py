@@ -102,12 +102,6 @@ def read_data(fn):
 
     return(d)
 
-def absmax(x):
-    return(x[np.abs(x).argmax()])
-
-def absargmax(x):
-    return(np.abs(x).argmax())
-
 def logit(p):
     return np.log(p) - np.log(1 - p)
 
@@ -123,8 +117,8 @@ def group_preds(predictions,labels):
         idnum = labels[i]
         label = predictions[1][i]
         pred = predictions[0][i].argmax()
-        val = absmax(predictions[0][i])
-
+        val = predictions[0][i].max()
+ 
         try:
             res_dict[idnum]['pred'].append(pred)
             res_dict[idnum]['val'].append(val)
@@ -133,7 +127,8 @@ def group_preds(predictions,labels):
             
     return(res_dict)
 
-def majority_vote(res_dict,tiebreaker=None):
+
+def majority_vote(res_dict,p=0.5):
     
     maj_dict = {'matches':dict(),
                 'ties':[]}
@@ -142,35 +137,20 @@ def majority_vote(res_dict,tiebreaker=None):
         
         if len(res_dict[k]['pred']) == 1:
             
-            if res_dict[k]['pred'] == res_dict[k]['label']:
-                maj_dict['matches'][k] = [1,1] 
-            else:
-                maj_dict['matches'][k] = [0,1] 
-        
-        if len(res_dict[k]['pred']) > 1:
+            n_str = 1
+            decision = res_dict[k]['pred'][0]
+            
+        else:
             
             n_str = len(res_dict[k]['pred'])
-            maj = res_dict[k]['pred'].count(1)/len(res_dict[k]['pred'])
-            
-            if maj == 0.5:
-                maj_dict['ties'].append(k)
+            decision = res_dict[k]['pred'][np.argmax(res_dict[k]['val'])]
+           
+        if decision == res_dict[k]['label']:
+            m = 1
+        else:
+            m = 0
                 
-                if tiebreaker == 'max':
-                    p = res_dict[k]['pred'][absargmax(res_dict[k]['val'])]
-                    maj_dict['matches'][k] = [p,n_str]
-                if tiebreaker == 'mean':
-                    p = inv_logit(res_dict[k]['val']).mean()
-                    if p >= 0.5:
-                        pp = 1
-                    else:
-                        pp = 0
-                    maj_dict['matches'][k] = [pp,n_str]
-                
-            else:
-                if maj > 0.5:
-                    maj_dict['matches'][k] = [1,n_str]
-                if maj < 0.5:
-                    maj_dict['matches'][k] = [0,n_str]
+        maj_dict['matches'][k] = [m,n_str]
 
     return(maj_dict)
 
@@ -197,6 +177,8 @@ if len(sys.argv) == 3 and sys.argv[1] in ['1','2','3']:
     tbl_fn = sys.argv[2]
     if 'chunk' in tbl_fn:
         chunked = True
+    else:
+        chunked = False
     folder_fn = tbl_fn.replace('tbl_to_python_updated_','punc_').replace('.csv.gz','')
 else:
     sys.exit(exit_break) 
@@ -210,7 +192,7 @@ work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/
 data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
 
-token_dir = os.path.join(out_dir,'token')
+token_dir = os.path.join(out_dir,'punc','token')
 pretrain_dir = os.path.join(out_dir,'pretrain')
 finetune_dir = os.path.join(out_dir,'finetune',folder_fn)
 sweep_dir = os.path.join(out_dir,'sweep')
@@ -412,8 +394,8 @@ pl2 = FillMaskPipeline(model2.to('cpu'),tokenizer=tokenizer)
 s1 = 'This frail old lady came in confused. Ended up needing to be oriented \
 to place given her confusion. This happened after surgery.'
 s2 = 'This lady has alzheimers. She otherwise is healthy and at her baseline \
-is aoxtwo. After her surgery, she became aoxzero. She was discharged a few \
-days later once she returned to baseline.'
+is aoxtwo. After her surgery, she became aoxzero and was confused. She was \
+discharged a few days later once she returned to baseline.'
 s3 = 'This lady has alzheimers. She otherwise is healthy and at her baseline \
 is aoxtwo. After her surgery, she was still aoxtwo. She had no issues during \
 her stay. She slept well throughout the night. She remained afebrile and was \

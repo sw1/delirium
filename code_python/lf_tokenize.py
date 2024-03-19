@@ -124,7 +124,7 @@ os.environ['MASTER_PORT'] = '1111'
 s1 = 1234 
 seq_len = 4096
 update_vocab_len = int(50000) #int(5e4)
-min_freq = int(10) #10
+min_freq = int(2) #10
 no_punc = False
 
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
@@ -135,7 +135,7 @@ if no_punc:
     tbl_fn = 'tbl_to_python_231205.csv.gz'
     print('Fitting model without punctuation.')
 else:
-    tbl_fn = 'tbl_to_python_updated.csv.gz'
+    tbl_fn = 'tbl_to_python_updated_chunked.csv.gz'
     out_dir = os.path.join(out_dir,'punc')
     print('Fitting model with punctuation.')
     
@@ -145,11 +145,18 @@ token_dir = os.path.join(out_dir,'token')
 out_pretrain_dir = os.path.join(out_dir,'pretrain')
 out_finetune_dir = os.path.join(out_dir,'finetune')
 
-d_train = Dataset.from_dict(dat['train']).remove_columns(['id','hpi','labels','icd_sum','labels_h'])
+d_train = Dataset.from_dict(dat['train'])
+
+def get_training_corpus():
+    return (
+        d_train[i : i + 1000]["text"]
+        for i in range(0, len(d_train), 1000)
+    )
+
+training_corpus = get_training_corpus()
 
 mod = 'yikuan8/Clinical-Longformer'
-texts = iter([d_train[i]['text'] for i in range(len(d_train))])
-words = ['Nissen','beth','israel','deaconess','brigham','dimock','Spaulding','bidmc',
+words = ['nissen','bidmc','beth','israel','deaconess','brigham','dimock','spaulding','bidmc',
          'arbor','shore','plymouth','carney','baptist','auburn','lawrence','cambridge',
          'haldol','seroquel','aoxtwo','aoxone','aoxthree','aoxzero']
 
@@ -158,14 +165,11 @@ print('\n\nTesting words prior to training.')
 for w in words:
     in_out = tokenizer.convert_ids_to_tokens(tokenizer.encode(w))
     print('%s: %s' % (w,in_out))
-print('\nBottom 50 words.')
-print(sorted(tokenizer.vocab.items(),key=lambda x: x[1])[1000:1050])
-print('\nTop 50 words')
-print(sorted(tokenizer.vocab.items(),key=lambda x: x[1],reverse=True)[:50])
 print('\nVocab length %s.' % len(tokenizer.vocab))
     
 #tokenizer.normalizer = normalizers.Sequence([NFD(), BertNormalizer(), Strip(), StripAccents()])
-tokenizer_update = tokenizer.train_new_from_iterator(texts,vocab_size=update_vocab_len, 
+tokenizer_update = tokenizer.train_new_from_iterator(training_corpus,
+                                                     vocab_size=update_vocab_len, 
                                                      min_frequency=min_freq,
                                                      show_progress=True)
 
@@ -173,12 +177,29 @@ tokenizer_update = tokenizer.train_new_from_iterator(texts,vocab_size=update_voc
 
 print('\n\nTesting words after training.')
 for w in words:
-    in_out = tokenizer.convert_ids_to_tokens(tokenizer.encode(w))
-    print('%s: %s' % (w,in_out))
-print('\nBottom 50 words.')
-print(sorted(tokenizer.vocab.items(),key=lambda x: x[1])[1000:1050])
-print('\nTop 50 words')
-print(sorted(tokenizer.vocab.items(),key=lambda x: x[1],reverse=True)[:50])
+    #in_out = tokenizer.convert_ids_to_tokens(tokenizer.encode(w))
+    tokened = tokenizer.tokenize(w)
+    print('%s: %s' % (w,tokened))
+print('\nVocab length %s.' % len(tokenizer.vocab))
+
+print('\n\nTesting words after training.')
+for w in words:
+    #in_out = tokenizer_update.convert_ids_to_tokens(tokenizer_update.encode(w))
+    tokened = tokenizer_update.tokenize(w)
+    print('%s: %s' % (w,tokened))
+print('\nVocab length %s.' % len(tokenizer_update.vocab))
+
+new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
+tokenizer.add_tokens(new_tokens)
+
+print('\n\nTesting words after merging.')
+for w in words:
+    #in_out = tokenizer_update.convert_ids_to_tokens(tokenizer_update.encode(w))
+    tokened = tokenizer.tokenize(w)
+    print('%s: %s' % (w,tokened))
 print('\nVocab length %s.' % len(tokenizer.vocab))
 
 tokenizer_update.save_pretrained(token_dir)
+
+
+

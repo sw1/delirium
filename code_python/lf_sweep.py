@@ -159,7 +159,7 @@ out_token_pretrain_finetune = os.path.join(sweep_dir,'sweep_model_token_pretrain
 
 out_token = os.path.join(token_dir,'custom_tokenizer.json')
 
-dat = read_data(os.path.join(data_dir,'tbl_to_python_updated.csv.gz'))
+dat = read_data(os.path.join(data_dir,'tbl_to_python_updated_chunked.csv.gz'))
 
 d_train = Dataset.from_dict(dat['train'])
 d_val = Dataset.from_dict(dat['val'])
@@ -181,14 +181,24 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     mod = os.path.join(model_token_pretrain,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
-    tokenizer = AutoTokenizer.from_pretrained(token_dir,use_fast=True,max_length=seq_len)
+    tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
+                                              use_fast=True,max_length=seq_len)
+    tokenizer_update = AutoTokenizer.from_pretrained(token_dir,
+                                                     use_fast=True,max_length=seq_len)
+    new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
+    tokenizer.add_tokens(new_tokens)
+    print('Length of updated tokenizer: %s' % len(tokenizer))
+    dim1 = str(model.get_input_embeddings())
+    model.resize_token_embeddings(len(tokenizer))
+    dim2 = str(model.get_input_embeddings())
+    print("Resizing model embedding layer from %s to %s." % (dim1,dim2))
     out_dir = out_token_pretrain_finetune
 
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
-conf.hidden_dropout_prob=0.1
+#conf.hidden_dropout_prob=0.1
 #conf.attention_probs_dropout_prob=0.1
-conf.classifier_dropout=0.1
+#conf.classifier_dropout=0.1
 
 def tokenize_dataset(data):
     
@@ -213,12 +223,12 @@ d_val = d_val.map(tokenize_dataset,batched=True,num_proc=16)
 if balance_data:
     print("Balancing training data.")
     
-    positive_label = d_train.filter(lambda example: example['labels']==1, num_proc=8) 
-    negative_label = d_train.filter(lambda example: example['labels']==0, num_proc=8)
+    positive_label = d_train.filter(lambda example: example['labels']==1, num_proc=16) 
+    negative_label = d_train.filter(lambda example: example['labels']==0, num_proc=16)
     
     n_upsamp = len(negative_label) // len(positive_label)
 
-    random.seed(10)
+    random.seed(1)
     seeds = random.sample(range(9999), n_upsamp)
 
     balanced_data = None
@@ -253,6 +263,7 @@ else:
             loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
             return (loss, outputs) if return_outputs else loss
         
+        
 def compute_metrics1(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
@@ -279,7 +290,6 @@ def compute_metrics2(eval_pred):
     return {"accuracy": acc, "f1": f1, "auc": auc, "precision": prec, "recall": rec, 
             "batch_length": len(preds),"pred_positive": sum(preds), "true_positive": sum(labels)}
 
-
 print('Training groups.')
 print([d_train['labels'].count(0),d_train['labels'].count(1)])
 
@@ -295,9 +305,9 @@ def get_f1(trainer):
             
 def objective(trial):
 
-    #conf_lf.hidden_dropout_prob=0.1 # 0.1
-    #conf_lf.attention_probs_dropout_prob=0.1 # 0.1 # was off, changed 11/15
-    #conf_lf.classifier_dropout=0.1 # 0.1
+    conf.hidden_dropout_prob=trial.suggest_categorical("dropout_hidden", [0.1,0.2]), 
+    #conf.attention_probs_dropout_prob=0.1 # 0.1 # was off, changed 11/15
+    conf.classifier_dropout=trial.suggest_categorical("dropout_classify", [0.1,0.2]), 
     
     training_args = TrainingArguments(
 
@@ -323,8 +333,8 @@ def objective(trial):
         metric_for_best_model='f1',
         greater_is_better=True,
 
-        num_train_epochs=trial.suggest_int("num_train_epochs", 2, 5),
-        learning_rate=trial.suggest_float("learning_rate", 5e-7, 1e-6, log=True), 
+        num_train_epochs=3, # from previous sweep
+        learning_rate=7.53e-07, # from previous sweep
         lr_scheduler_type='constant_with_warmup',
                                       
         label_smoothing_factor=trial.suggest_float("label_smoothing_factor",1e-5, 0.3, log=True),#0.1, #0.1,
@@ -370,7 +380,7 @@ study = optuna.create_study(
     load_if_exists=True,
 )
     
-study.optimize(objective,n_trials=7,show_progress_bar=True)
+study.optimize(objective,n_trials=10,show_progress_bar=True)
         
 
 print("Printing best value:")

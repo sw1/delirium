@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 
 import gzip
 import csv
@@ -102,12 +103,6 @@ def read_data(fn):
 
     return(d)
 
-def absmax(x):
-    return(x[np.abs(x).argmax()])
-
-def absargmax(x):
-    return(np.abs(x).argmax())
-
 def logit(p):
     return np.log(p) - np.log(1 - p)
 
@@ -123,8 +118,8 @@ def group_preds(predictions,labels):
         idnum = labels[i]
         label = predictions[1][i]
         pred = predictions[0][i].argmax()
-        val = absmax(predictions[0][i])
-        
+        val = predictions[0][i].max()
+ 
         try:
             res_dict[idnum]['pred'].append(pred)
             res_dict[idnum]['val'].append(val)
@@ -133,7 +128,8 @@ def group_preds(predictions,labels):
             
     return(res_dict)
 
-def majority_vote(res_dict,tiebreaker=None):
+
+def majority_vote(res_dict,p=0.5):
     
     maj_dict = {'matches':dict(),
                 'ties':[]}
@@ -142,35 +138,20 @@ def majority_vote(res_dict,tiebreaker=None):
         
         if len(res_dict[k]['pred']) == 1:
             
-            if res_dict[k]['pred'] == res_dict[k]['label']:
-                maj_dict['matches'][k] = [1,1] 
-            else:
-                maj_dict['matches'][k] = [0,1] 
-        
-        if len(res_dict[k]['pred']) > 1:
+            n_str = 1
+            decision = res_dict[k]['pred'][0]
+            
+        else:
             
             n_str = len(res_dict[k]['pred'])
-            maj = res_dict[k]['pred'].count(1)/len(res_dict[k]['pred'])
-            
-            if maj == 0.5:
-                maj_dict['ties'].append(k)
+            decision = res_dict[k]['pred'][np.argmax(res_dict[k]['val'])]
+           
+        if decision == res_dict[k]['label']:
+            m = 1
+        else:
+            m = 0
                 
-                if tiebreaker == 'max':
-                    p = res_dict[k]['pred'][absargmax(res_dict[k]['val'])]
-                    maj_dict['matches'][k] = [p,n_str]
-                if tiebreaker == 'mean':
-                    p = inv_logit(res_dict[k]['val']).mean()
-                    if p >= 0.5:
-                        pp = 1
-                    else:
-                        pp = 0
-                    maj_dict['matches'][k] = [pp,n_str]
-                
-            else:
-                if maj > 0.5:
-                    maj_dict['matches'][k] = [1,n_str]
-                if maj < 0.5:
-                    maj_dict['matches'][k] = [0,n_str]
+        maj_dict['matches'][k] = [m,n_str]
 
     return(maj_dict)
 
@@ -178,7 +159,7 @@ os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
 
-s1 = 1234 
+#s1 = 1234 
 seq_len = 4096
 balance_data = True
 no_punc = False
@@ -187,19 +168,43 @@ pipelines = ('finetune repo model',
              'finetune pretrained model',
              'finetune pretrained model that used custom tokenizer')
 
-exit_break = "\nSpecify a pipeline and table filename:\n\n \
+exit_break = "\nSpecify pipeline, table filename, seeds (2):\n\n \
         \t pipeline 1: %s\n \
         \t pipeline 2: %s\n \
-        \t pipeline 3: %s\n" % pipelines
+        \t pipeline 3: %s\n\n \
+        \t consider \n \
+        \t\t dropout 0.1 \n \
+        \t\t w_decay 0.0009-0.11\n \
+        \t\t lab_smooth 0.0004-0.2 \n" % pipelines
 
-if len(sys.argv) == 3 and sys.argv[1] in ['1','2','3']:
+if len(sys.argv) == 5 and sys.argv[1] in ['1','2','3']:
     pipeline = int(sys.argv[1]) 
     tbl_fn = sys.argv[2]
+    w_decay = 0.0002 #float(sys.argv[3])
+    lab_smooth = 0.00001 #0.242 #float(sys.argv[4])
+    do_hidden = 0.1 #float(sys.argv[5])
+    do_class = 0.1 #float(sys.argv[6])
+    s1 = int(sys.argv[3])
+    s2 = int(sys.argv[4])
     if 'chunk' in tbl_fn:
         chunked = True
-    folder_fn = tbl_fn.replace('tbl_to_python_updated_','punc_').replace('.csv.gz','')
+    else:
+        chunked = False
+    folder_prefix = 'pl%s_punc_' % pipeline
+    folder_suffix = '_wdec%s_labsm%s_doh%s_doc%s_sa%s_sb%s' % (w_decay,lab_smooth,do_hidden,do_class,s1,s2)
+    folder_fn = tbl_fn.replace('tbl_to_python_updated_',folder_prefix).replace('.csv.gz',folder_suffix)
 else:
     sys.exit(exit_break) 
+    
+params = dict()
+params['s1'] = s1
+params['s2'] = s2
+params['do_hidden'] = do_hidden
+params['do_class'] = do_class
+params['n_train_epochs'] = 3
+params['lr'] = 7.53e-07
+params['w_decay'] = w_decay
+params['lab_smooth'] = lab_smooth
     
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 print("\n\nNumber of devices: %s.\n \
@@ -209,8 +214,8 @@ work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/
 data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
 
-token_dir = os.path.join(out_dir,'token')
-pretrain_dir = os.path.join(out_dir,'pretrain')
+token_dir = os.path.join(out_dir,'punc','token')
+pretrain_dir = os.path.join(out_dir,'punc','pretrain')
 finetune_dir = os.path.join(out_dir,'finetune',folder_fn)
 sweep_dir = os.path.join(out_dir,'sweep')
 
@@ -261,7 +266,8 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
                                               use_fast=True,max_length=seq_len)
     tokenizer_update = AutoTokenizer.from_pretrained(token_dir,
                                                      use_fast=True,max_length=seq_len)
-    tokenizer.add_tokens(list(tokenizer_update.vocab))
+    new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
+    tokenizer.add_tokens(new_tokens)
     print('Length of updated tokenizer: %s' % len(tokenizer))
     dim1 = str(model.get_input_embeddings())
     model.resize_token_embeddings(len(tokenizer))
@@ -271,11 +277,22 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
 
 print('\nModel output directory:\n%s' % out_dir) 
 
+if os.path.exists(out_dir):
+    shutil.rmtree(out_dir)
+os.makedirs(out_dir)
+
+with open(os.path.join(out_dir,'params.dat'), "w") as f:
+    for key, value in params.items():
+        print(f"{key}: {value}", file=f)
+
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
-conf.hidden_dropout_prob=0.1
+#conf.hidden_dropout_prob=0.1
 #conf.attention_probs_dropout_prob=0.1
-conf.classifier_dropout=0.1
+#conf.classifier_dropout=0.1
+
+conf.hidden_dropout_prob=params['do_hidden']
+conf.classifier_dropout=params['do_class']
 
 def tokenize_dataset(data):
     
@@ -312,7 +329,7 @@ if balance_data:
     
     n_upsamp = len(negative_label) // len(positive_label)
 
-    random.seed(10)
+    random.seed(params['s1'])
     seeds = random.sample(range(9999), n_upsamp)
 
     balanced_data = None
@@ -346,25 +363,25 @@ else:
             loss_fct = nn.CrossEntropyLoss(weight=torch.tensor(w).to(device))
             loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
             return (loss, outputs) if return_outputs else loss
-        
-# s/p sweep
-if pipeline == 1:
-    n_train_epochs=3
-    lr=8.4603e-07
-    lab_smooth=0.2070
-    w_decay=0.1133
-if pipeline == 2:
-    n_train_epochs=2
-    lr=6.1845e-07
-    lab_smooth=0.0004
-    w_decay=0.0009
-if pipeline == 3:
-    n_train_epochs=3
-    lr=7.9403e-07
-    lab_smooth=0.0003
-    w_decay=0.0127
 
-training_args = TrainingArguments(seed=s1,
+## s/p sweep
+#if pipeline == 1:
+    #params['n_train_epochs'] = 3
+    #params['lr'] = 8.4603e-07
+    #params['lab_smooth'] = 0.2070
+    #params['w_decay'] = 0.1133
+#if pipeline == 2:
+    #params['n_train_epochs'] = 2
+    #params['lr'] = 6.1845e-07
+    #params['lab_smooth'] = 0.0004
+    #params['w_decay'] = 0.0009
+#if pipeline == 3:
+    #params['n_train_epochs'] = 3
+    #params['lr'] = 7.9403e-07
+    #params['lab_smooth'] = 0.0003
+    #params['w_decay'] = 0.0127
+
+training_args = TrainingArguments(seed=params['s2'],
                                   
                                   disable_tqdm=False,
                                   
@@ -388,12 +405,12 @@ training_args = TrainingArguments(seed=s1,
                                   metric_for_best_model='f1',
                                   greater_is_better=True,
                                   
-                                  num_train_epochs=n_train_epochs, 
-                                  learning_rate=lr, #7e-6,
+                                  num_train_epochs=params['n_train_epochs'], 
+                                  learning_rate=params['lr'], #7e-6,
                                   lr_scheduler_type='constant_with_warmup',
                                   
-                                  label_smoothing_factor=lab_smooth,
-                                  weight_decay=w_decay, 
+                                  label_smoothing_factor=params['lab_smooth'],
+                                  weight_decay=params['w_decay'], 
                                   
                                   fp16=True,
                                   auto_find_batch_size=True,

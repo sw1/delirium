@@ -116,8 +116,8 @@ s1 = 1234
 seq_len = 4096
 checkpoint = False
 cp = 'checkpoint-50000'
-n_epochs_cp = 2
-n_epochs = 5
+n_epochs_cp = 15
+n_epochs = 20 #5
 no_punc = False
 
 pipelines = ('pretrain repo model',
@@ -139,7 +139,7 @@ if no_punc:
     tbl_fn = 'tbl_to_python_231205.csv.gz'
     print('Fitting model without punctuation.')
 else:
-    tbl_fn = 'tbl_to_python_updated.csv.gz'
+    tbl_fn = 'tbl_to_python_updated_chunked.csv.gz'
     out_dir = os.path.join(out_dir,'punc')
     print('Fitting model with punctuation.')
     
@@ -210,33 +210,6 @@ def tokenize_function(data):
         max_length=seq_len,
         return_special_tokens_mask=True,
     )
-    
-def tokenize_function2(data):
-  seqs = []
-  for line in data['text']:
-    if len(line) > seq_len:
-      start = 0
-      subseqs = []
-      while True
-        end = line[start:end].rfind(" ")
-        subseq = line[start,end]
-        if len(subseq) > 0 and not line.isspace():
-          subseqs.append(subseq)
-        start = end + 1
-        end = start + seq_len
-        if len(subseq) < seq_len:
-          seqs = seqs + subseqs
-          break
-    elif len(line) > 0 and not line.isspace():
-      seqs.append(line)
-    
-  return tokenizer(
-    seqs,
-    padding='max_length',
-    truncation=True,
-    max_length=seq_len,
-    return_special_tokens_mask=True,
-  )
 
 d_train = d_train.map(tokenize_function,
                       batched=True,
@@ -285,7 +258,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=8,
     #per_device_eval_batch_size=8,
     
-    #resume_from_checkpoint = checkpoint,
+    resume_from_checkpoint = checkpoint,
 )
 
 trainer = Trainer(
