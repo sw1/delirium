@@ -2,8 +2,9 @@ library(text2vec)
 library(stopwords)
 library(tidyverse)
 library(tm)
+library(glue)
 
-a <- 1e-5
+# script to create document embeddings from word embeddings
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -11,37 +12,32 @@ if (Sys.info()['login'] == 'sw1'){
 if (Sys.info()['login'] == 'sw424'){
   path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
 }
+source(file.path(path,'code','fxns.R'))
 
-cat('Reading table.\n')
-dat <- read_csv(file.path(path,'to_python','tbl_to_python_updated_chunked.csv.gz')) %>%
-  mutate(hpi_hc=stripWhitespace(trimws(str_replace_all(hpi_hc,'[[:punct:]]',''),'both')))
+a <- 1e-5 # doc embedding weighting parameter
 
-train <- dat %>% 
-  filter(set %in% c('train','val')) %>% 
-  select(id,text=hpi_hc)
-test <- dat %>% 
-  select(id,text=hpi_hc) %>%
-  anti_join(train,by='id')
-
-tbls <- list(train=train,test=test)
-rm(list=c('dat','train','test'))
-
+# read preprocessed tables, vocab
+tbls <- read_rds(file.path(path,'data_in','glove_tbls.rds'))
 vocab <- read_rds(file.path(path,'data_in','vocab.rds'))
-freqs <- vocab$term_count/sum(vocab$term_count) # weighting by f in train only
+
+# create word downweighting for training only
+freqs <- vocab$term_count/sum(vocab$term_count) 
 w <- a/(a+freqs)
 
+# downweight word vectors
 word_vectors <- read_rds(file.path(path,'data_in','word_vectors.rds'))
 word_vectors <- word_vectors * w
 
+# loop through both tables and build doc vectors
 for (fn in names(tbls)){
   
-  cat(sprintf('Building training doc vectors for %s.\n',fn))
-  dtm <- read_rds(file.path(path,'data_in',sprintf('dtm_%s.rds',fn)))
+  cat(glue('\nBuilding training doc vectors for {fn}.\n\n'))
+  dtm <- read_rds(file.path(path,'data_in',glue('dtm_{fn}.rds')))
   doc_vectors <- as.matrix((dtm %*% word_vectors)/Matrix::rowSums(dtm))
   rownames(doc_vectors) <- rownames(dtm)
   
-  cat(sprintf('Saving output for %s.\n',fn))
-  write_rds(doc_vectors,file.path(path,'data_in',sprintf('doc_vectors_%s.rds',fn)))
+  cat(glue('\nSaving output for {fn}.\n\n'))
+  write_rds(doc_vectors,file.path(path,'data_in',glue('doc_vectors_{fn}.rds')))
   
 }
 

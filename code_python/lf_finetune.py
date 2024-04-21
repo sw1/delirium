@@ -47,128 +47,18 @@ from sklearn.utils import compute_class_weight
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 from sklearn.model_selection import train_test_split
 
-def print_gpu_utilization():
-    nvmlInit()
-    handle = nvmlDeviceGetHandleByIndex(0)
-    info = nvmlDeviceGetMemoryInfo(handle)
-    print(f"GPU memory occupied: {info.used//1024**2} MB.")
-
-def print_summary(result):
-    print(f"Time: {result.metrics['train_runtime']:.2f}")
-    print(f"Samples/second: {result.metrics['train_samples_per_second']:.2f}")
-    print_gpu_utilization()
-
-def read_data(fn):
-    d = {s: {'id':[],'text':[], 'hpi':[], 'labels':[], 'icd_sum':[], 'labels_h':[]} 
-         for s in ['train','val','test_icd','test_haobo']}
-    
-    reader = csv.reader(gzip.open(fn,mode='rt',encoding='utf-8'))
-
-    header = next(reader, None)
-
-    idx_id = header.index('id')
-    idx_hpi = header.index('hpi')
-    idx_label = header.index('label_icd')
-    idx_text = header.index('hpi_hc')
-    idx_label_h = header.index('label')
-    idx_set = header.index('set')
-    idx_icd_sum = header.index('icd_sum')
-
-    for row in reader:
-
-        try:
-            idn = int(row[idx_id])
-        except ValueError:
-            idn = int(float(row[idx_id]))
-
-        idn = row[idx_id]
-        setn = row[idx_set]        
-        text = row[idx_text]
-        hpi = row[idx_hpi]
-        icd_sum = int(row[idx_icd_sum])
-        label = int(row[idx_label])
-        
-        label_h = row[idx_label_h]
-        if label_h == 'NA':
-            label_h = -1
-        else:
-            label_h = int(label_h)
-
-        d[setn]['labels'].append(label)
-        d[setn]['labels_h'].append(label_h)
-        d[setn]['text'].append(text) 
-        d[setn]['id'].append(idn)
-        d[setn]['hpi'].append(hpi)
-        d[setn]['icd_sum'].append(icd_sum)
-
-    return(d)
-
-def logit(p):
-    return np.log(p) - np.log(1 - p)
-
-def inv_logit(p):
-    return np.exp(p) / (1 + np.exp(p))
-
-def group_preds(predictions,labels):
-    
-    N = len(labels)
-    res_dict = dict()
-    
-    for i in range(N):
-        idnum = labels[i]
-        label = predictions[1][i]
-        pred = predictions[0][i].argmax()
-        val = predictions[0][i].max()
- 
-        try:
-            res_dict[idnum]['pred'].append(pred)
-            res_dict[idnum]['val'].append(val)
-        except KeyError:
-            res_dict[idnum] = {'label':label,'pred':[pred],'val':[val]}
-            
-    return(res_dict)
-
-
-def majority_vote(res_dict,p=0.5):
-    
-    maj_dict = {'matches':dict(),
-                'ties':[]}
-
-    for k,v in res_dict.items():
-        
-        if len(res_dict[k]['pred']) == 1:
-            
-            n_str = 1
-            decision = res_dict[k]['pred'][0]
-            
-        else:
-            
-            n_str = len(res_dict[k]['pred'])
-            decision = res_dict[k]['pred'][np.argmax(res_dict[k]['val'])]
-           
-        if decision == res_dict[k]['label']:
-            m = 1
-        else:
-            m = 0
-                
-        maj_dict['matches'][k] = [m,n_str]
-
-    return(maj_dict)
+# import custom functions
+from lf_functions import *
 
 os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
 
-#s1 = 1234 
-seq_len = 4096
-balance_data = True
-no_punc = False
-
 pipelines = ('finetune repo model',
              'finetune pretrained model',
              'finetune pretrained model that used custom tokenizer')
 
-exit_break = "\nSpecify pipeline, table filename, seeds (2):\n\n \
+exit_break = "\nSpecify pipeline, table filename, seeds (2), train_on_expert:\n\n \
         \t pipeline 1: %s\n \
         \t pipeline 2: %s\n \
         \t pipeline 3: %s\n\n \
@@ -177,91 +67,106 @@ exit_break = "\nSpecify pipeline, table filename, seeds (2):\n\n \
         \t\t w_decay 0.0009-0.11\n \
         \t\t lab_smooth 0.0004-0.2 \n" % pipelines
 
-if len(sys.argv) == 5 and sys.argv[1] in ['1','2','3']:
-    pipeline = int(sys.argv[1]) 
-    tbl_fn = sys.argv[2]
-    w_decay = 0.0002 #float(sys.argv[3])
-    lab_smooth = 0.00001 #0.242 #float(sys.argv[4])
-    do_hidden = 0.1 #float(sys.argv[5])
-    do_class = 0.1 #float(sys.argv[6])
-    s1 = int(sys.argv[3])
-    s2 = int(sys.argv[4])
-    if 'chunk' in tbl_fn:
-        chunked = True
+# bash prompt to pass in params for fit and dir/filenames
+# in cmd line pass in tbl name assuming tbl has 'chunked' in middle.
+# this will append lf params to name and keep st params
+# call should look like: 
+# python lf_finetune.py tbl_to_python_expertupdate_chunked_rfst_majvote_th70_nfeat75.csv.gz 1 532 412 1
+if len(sys.argv) == 6 and sys.argv[2] in ['1','2','3']:
+    tbl_fn = sys.argv[1]
+    pl = int(sys.argv[2]) 
+    w_decay = 0.0002 
+    lab_smooth = 0.00001 
+    do_hidden = 0.1 # dropout in hidden layer
+    do_class = 0.1 # dropout in classification layer
+    s1 = int(sys.argv[3]) # seed dujring class balancing
+    s2 = int(sys.argv[4]) # seed during training
+    train_on_expert = int(sys.argv[5]) # whether to use remaining expert labels in training
+    folder_prefix = 'pl%s' % pl
+    folder_suffix = '_wdec%s_labsm%s_doh%s_doc%s_sa%s_sb%s_toe%s' % (w_decay,lab_smooth,do_hidden,do_class,s1,s2,train_on_expert)
+    folder_fn = re.sub(r".*?chunked_?",folder_prefix,tbl_fn).replace('.csv.gz',folder_suffix)
+    
+    if 'rfst' in tbl_fn:
+        st = True
     else:
-        chunked = False
-    folder_prefix = 'pl%s_punc_' % pipeline
-    folder_suffix = '_wdec%s_labsm%s_doh%s_doc%s_sa%s_sb%s' % (w_decay,lab_smooth,do_hidden,do_class,s1,s2)
-    folder_fn = tbl_fn.replace('tbl_to_python_updated_',folder_prefix).replace('.csv.gz',folder_suffix)
+        st = False
+        
+    if train_on_expert == 1:
+        train_on_expert = True
 else:
     sys.exit(exit_break) 
+    
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+print('\n\nNumber of devices: %s.\n \
+    Device set to %s.\n' % (torch.cuda.device_count(),device))
+
+print('\nModel output folder name:\n%s' % folder_fn)    
+
+# cpu processess for processing data and tokenizing
+cores = 16
+seq_len = 4096 
     
 params = dict()
 params['s1'] = s1
 params['s2'] = s2
 params['do_hidden'] = do_hidden
 params['do_class'] = do_class
-params['n_train_epochs'] = 3
+params['n_train_epochs'] = 3 
 params['lr'] = 7.53e-07
 params['w_decay'] = w_decay
 params['lab_smooth'] = lab_smooth
-    
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-print("\n\nNumber of devices: %s.\n \
-    Device set to %s.\n\n" % (torch.cuda.device_count(),device))
 
+# set directory locations
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
 data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
 
-token_dir = os.path.join(out_dir,'punc','token')
-pretrain_dir = os.path.join(out_dir,'punc','pretrain')
-finetune_dir = os.path.join(out_dir,'finetune',folder_fn)
-sweep_dir = os.path.join(out_dir,'sweep')
+token_dir = os.path.join(out_dir,'token') # labels/rfst doenst apply, so one model
+pretrain_dir = os.path.join(out_dir,'pretrain') # labels/rfst doesnt apply, so one model
+finetune_dir = os.path.join(out_dir,'finetune',folder_fn) # needs a unique folder since labels/strf
 
-model_pretrain = os.path.join(pretrain_dir,'model_pretrain')
-model_token_pretrain = os.path.join(pretrain_dir,'model_token_pretrain')
+model_pretrain = os.path.join(pretrain_dir,'model_pretrain') # loc for pretrained mod
+model_token_pretrain = os.path.join(pretrain_dir,'model_token_pretrain') # loc for custom tok and pretrained mod
 
-out_token = os.path.join(token_dir,'custom_tokenizer.json')
-    
-print('\nModel output filename:\n%s' % tbl_fn)    
-    
-dat = read_data(os.path.join(data_dir,tbl_fn))
+out_token = os.path.join(token_dir,'custom_tokenizer.json') # location of custom tok
+out_finetune = os.path.join(finetune_dir,'final_model_finetune') # location to output mod, pl1
+out_pretrain_finetune = os.path.join(finetune_dir,'final_model_pretrain_finetune') # location to output mod, pl2
+out_token_pretrain_finetune = os.path.join(finetune_dir,'final_model_token_pretrain_finetune') # location to output mod, pl3
 
-out_finetune = os.path.join(finetune_dir,'final_model_finetune')
-out_pretrain_finetune = os.path.join(finetune_dir,'final_model_pretrain_finetune')
-out_token_pretrain_finetune = os.path.join(finetune_dir,'final_model_token_pretrain_finetune')
+# load data w/ function above
+dat = read_data(os.path.join(data_dir,tbl_fn),train_on_expert=train_on_expert,st=st)
 
+# split sets
 d_train = Dataset.from_dict(dat['train'])
-#d_train = d_train.train_test_split(test_size=0.95,shuffle=True,seed=s1)['train'] #subset data
+#d_train = d_train.train_test_split(test_size=0.95,shuffle=True,seed=s1)['train'] #subset data  ################## change back
+
 d_val = Dataset.from_dict(dat['val'])
-d_test_haobo = Dataset.from_dict(dat['test_haobo'])
+d_test_expert = Dataset.from_dict(dat['test_expert'])
 d_test_icd = Dataset.from_dict(dat['test_icd'])
-
-if chunked:
-    d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_chunked_treeheldout.csv.gz'))
-else:
-    d_heldout = read_data(os.path.join(data_dir,'tbl_to_python_updated_treeheldout.csv.gz'))
-    
-d_heldout = Dataset.from_dict(d_heldout['test_haobo'])
-
-if pipeline == 1: # finetune with repo model
-    mod = 'yikuan8/Clinical-Longformer' 
+d_heldout = Dataset.from_dict(dat['heldout_expert'])
+                           
+# set up for designated pipeline                                      
+if pl == 1: # finetune with repo model
+    mod = 'yikuan8/Clinical-Longformer' # repo clinical lf
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained(mod,use_fast=True,max_length=seq_len)
     out_dir = out_finetune
-elif pipeline == 2: # finetune with pretrained model
-    mod = os.path.join(model_pretrain,'model')
+elif pl == 2: # finetune with pretrained model
+    mod = os.path.join(model_pretrain,'model') # pretrained mod
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
     out_dir = out_pretrain_finetune
-elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
-    mod = os.path.join(model_token_pretrain,'model')
+elif pl == 3: # finetune with pretrained model that used custom tokenizer
+    mod = os.path.join(model_token_pretrain,'model') # pretrained mod using custom tok
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
     model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
+    # same approach to train tokenizer:
+    # load repo tokenizer and newly trained custom tokenizer
+    # then add new tokens from custom tok to repo tok
+    # then update dimension size of mod
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
     tokenizer_update = AutoTokenizer.from_pretrained(token_dir,
@@ -272,31 +177,28 @@ elif pipeline == 3: # finetune with pretrained model that used custom tokenizer
     dim1 = str(model.get_input_embeddings())
     model.resize_token_embeddings(len(tokenizer))
     dim2 = str(model.get_input_embeddings())
-    print("Resizing model embedding layer from %s to %s." % (dim1,dim2))
+    print('Resizing model embedding layer from %s to %s.' % (dim1,dim2))
     out_dir = out_token_pretrain_finetune
 
 print('\nModel output directory:\n%s' % out_dir) 
 
+# create dir if doesnt exist
 if os.path.exists(out_dir):
     shutil.rmtree(out_dir)
 os.makedirs(out_dir)
 
+# dump params to have record
 with open(os.path.join(out_dir,'params.dat'), "w") as f:
     for key, value in params.items():
         print(f"{key}: {value}", file=f)
 
+# silence warning that seemingly isnt important
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
-#conf.hidden_dropout_prob=0.1
-#conf.attention_probs_dropout_prob=0.1
-#conf.classifier_dropout=0.1
-
-conf.hidden_dropout_prob=params['do_hidden']
-conf.classifier_dropout=params['do_class']
-
+# tokenizer function
 def tokenize_dataset(data):
     
-    data["text"] = [
+    data['text'] = [
         line for line in data["text"] if len(line) > 0 and not line.isspace()
     ]
         
@@ -309,60 +211,34 @@ def tokenize_dataset(data):
     )
 
 print('Tokenizing training data.')
-d_train = d_train.map(tokenize_dataset,batched=True,num_proc=16)
+d_train = d_train.map(tokenize_dataset,batched=True,num_proc=cores)
 print('Tokenizing validation data.')
-d_val = d_val.map(tokenize_dataset,batched=True,num_proc=16)
+d_val = d_val.map(tokenize_dataset,batched=True,num_proc=cores)
 print('Tokenizing testing data.')
-d_test_haoboset_hpihc = d_test_haobo.map(tokenize_dataset,batched=True,num_proc=16)
-d_test_icdset_hpihc = d_test_icd.map(tokenize_dataset,batched=True,num_proc=16)
-d_test_haoboset_hpi = d_test_haobo.remove_columns('text').rename_column('hpi','text').map(tokenize_dataset,batched=True,num_proc=16)
-d_test_icdset_hpi = d_test_icd.remove_columns('text').rename_column('hpi','text').map(tokenize_dataset,batched=True,num_proc=16)
-d_test_haobolabels_hpihc = d_test_haobo.remove_columns('labels').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
-d_test_haobolabels_hpi = d_test_haobo.remove_columns(['text','labels']).rename_column('hpi','text').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
-d_heldout_haobolabels_hpihc = d_heldout.remove_columns('labels').rename_column('labels_h','labels').map(tokenize_dataset,batched=True,num_proc=16)
+d_test_expert = d_test_expert.map(tokenize_dataset,batched=True,num_proc=cores)
+d_test_icd = d_test_icd.map(tokenize_dataset,batched=True,num_proc=cores)
+d_heldout = d_heldout.map(tokenize_dataset,batched=True,num_proc=cores)
 
-if balance_data:
-    print("Balancing training data.")
-    
-    positive_label = d_train.filter(lambda example: example['labels']==1, num_proc=16) 
-    negative_label = d_train.filter(lambda example: example['labels']==0, num_proc=16)
-    
-    n_upsamp = len(negative_label) // len(positive_label)
+# balance minorty class via upsampling with replacement
+print('Balancing training data.')
+positive_label = d_train.filter(lambda example: example['labels']==1, num_proc=cores) 
+negative_label = d_train.filter(lambda example: example['labels']==0, num_proc=cores)
 
-    random.seed(params['s1'])
-    seeds = random.sample(range(9999), n_upsamp)
+n_upsamp = len(negative_label) // len(positive_label)
 
-    balanced_data = None
-    for s in seeds:
-        if balanced_data:
-            balanced_data = concatenate_datasets([balanced_data, interleave_datasets([
-                positive_label.shuffle(seed=s), 
-                negative_label.shuffle(seed=s)
-            ])])
-        else:
-            balanced_data = interleave_datasets([positive_label, negative_label])
-    d_train = balanced_data
-    
-    class cTrainer(Trainer):
-        pass
-else:
-    w = compute_class_weight(class_weight='balanced',
-                             classes=np.unique(d_train['labels']),
-                             y=d_train['labels']).tolist()
-    
-    print('Class weights.')
-    print(w)
-    
-    class cTrainer(Trainer):
-        def compute_loss(self, model, inputs, return_outputs=False):
-            labels = inputs.get("labels")
-            # forward pass
-            outputs = model(**inputs)
-            logits = outputs.get("logits")
-            # compute weighted loss
-            loss_fct = nn.CrossEntropyLoss(weight=torch.tensor(w).to(device))
-            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
-            return (loss, outputs) if return_outputs else loss
+random.seed(params['s1'])
+seeds = random.sample(range(9999), n_upsamp)
+
+balanced_data = None
+for s in seeds:
+    if balanced_data:
+        balanced_data = concatenate_datasets([balanced_data, interleave_datasets([
+            positive_label.shuffle(seed=s), 
+            negative_label.shuffle(seed=s)
+        ])])
+    else:
+        balanced_data = interleave_datasets([positive_label, negative_label])
+d_train = balanced_data
 
 ## s/p sweep
 #if pipeline == 1:
@@ -381,6 +257,9 @@ else:
     #params['lab_smooth'] = 0.0003
     #params['w_decay'] = 0.0127
 
+conf.hidden_dropout_prob=params['do_hidden']
+conf.classifier_dropout=params['do_class']
+    
 training_args = TrainingArguments(seed=params['s2'],
                                   
                                   disable_tqdm=False,
@@ -423,6 +302,7 @@ training_args = TrainingArguments(seed=params['s2'],
                                   
                                  )
 
+# functions to compute metrics
 def compute_metrics1(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
@@ -440,14 +320,14 @@ def compute_metrics2(eval_pred):
     preds = np.argmax(logits, axis=-1)
     preds_scores = np.max(logits, axis=-1)
     
-    auc = evaluate.load("roc_auc").compute(references=labels, prediction_scores=preds_scores)['roc_auc']
+    auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=preds_scores)['roc_auc']
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
-    prec = evaluate.load("precision").compute(predictions=preds, references=labels)["precision"]
-    rec = evaluate.load("recall").compute(predictions=preds, references=labels)["recall"]
-    f1 = evaluate.load("f1").compute(predictions=preds, references=labels)['f1']
+    prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
+    rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
+    f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
 
-    return {"accuracy": acc, "f1": f1, "auc": auc, "precision": prec, "recall": rec, 
-            "batch_length": len(preds),"pred_positive": sum(preds), "true_positive": sum(labels)}
+    return {'accuracy': acc, 'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
+            'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
 print('Training groups.')
 print([d_train['labels'].count(0),d_train['labels'].count(1)])
@@ -455,14 +335,18 @@ print([d_train['labels'].count(0),d_train['labels'].count(1)])
 print('Validation groups.')
 print([d_val['labels'].count(0),d_val['labels'].count(1)])
 
-print('Testing ICD groups.')
+print('Testing expert groups.')
+print([d_test_expert['labels'].count(0),d_test_expert['labels'].count(1)])
+
+print('Testing icd groups.')
 print([d_test_icd['labels'].count(0),d_test_icd['labels'].count(1)])
 
-print('Testing Haobo groups.')
-print([d_test_haobo['labels'].count(0),d_test_haobo['labels'].count(1)])
+print('Heldout groups.')
+print([d_heldout['labels'].count(0),d_heldout['labels'].count(1)])
 
-print('Testing Heldout groups.')
-print([d_heldout_haobolabels_hpihc['labels'].count(0),d_heldout_haobolabels_hpihc['labels'].count(1)])
+# trainer function with early stopping
+class cTrainer(Trainer):
+    pass
 
 trainer = cTrainer(
     model=model.to(device),
@@ -474,13 +358,15 @@ trainer = cTrainer(
     callbacks = [EarlyStoppingCallback(early_stopping_patience=3)],
 )
 
+# make out dir if doesnt exist
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
-    
+
 print('Training.')
 result = trainer.train()
 model.save_pretrained(os.path.join(out_dir,'model'))
 
+# function to pull results
 res_eval = []
 res_loss = []
 e_s = None
@@ -503,6 +389,7 @@ for r in trainer.state.log_history:
         except KeyError:
             next
 
+# loss figure
 df = pd.DataFrame(res_loss,columns=['step','eval_loss','train_loss'])
 plt.figure()
 plt.plot(df['step'],df['eval_loss'],label='eval_loss')
@@ -510,6 +397,7 @@ plt.plot(df['step'],df['train_loss'],label='train_loss')
 plt.legend()
 plt.savefig(os.path.join(out_dir,'figure1.png'))
 
+# performance figure
 df = pd.DataFrame(res_eval,columns=['step','loss','acc','f1'])
 plt.figure()
 plt.plot(df['step'],df['acc'],label='acc')
@@ -517,109 +405,26 @@ plt.plot(df['step'],df['f1'],label='f1')
 plt.legend()
 plt.savefig(os.path.join(out_dir,'figure2.png'))
 
+# performance adjusting for chunks since each chunk has the same label but
+# is associated with a different section. hence will take max logistic
+# score between chunks to yield final predicted label
 test_results = {}
-if chunked:
-    tiebreaker = 'max'
-    
-    print('Testing Haobo set, HPI-HC.')
-    y_test = trainer.predict(d_test_haoboset_hpihc)
-    grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['haoboset_hpihc'] = y_test
 
-    print('Testing ICD set, HPI-HC.')
-    y_test = trainer.predict(d_test_icdset_hpihc)
-    grouped = group_preds(y_test,d_test_icd['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['icdset_hpihc'] = y_test
+print('Testing icd labels.')
+y_test = trainer.predict(d_test_icd)
+print(compute_eval_metrics(y_test,d_test_icd['id']))
+test_results['icdset_hpihc'] = y_test
 
-    print('Testing Haobo set, HPI only.')
-    y_test = trainer.predict(d_test_haoboset_hpi)
-    grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['haoboset_hpi'] = y_test
-    
-    print('Testing ICD set, HPI only.')
-    y_test = trainer.predict(d_test_icdset_hpi)
-    grouped = group_preds(y_test,d_test_icd['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['icdset_hpi'] = y_test
+print('Testing expert labels.')
+y_test = trainer.predict(d_test_expert)
+print(compute_eval_metrics(y_test,d_test_expert['id']))
+test_results['haobolabels_hpihc'] = y_test
 
-    print('Testing Haobo labels, HPI-HC.')
-    y_test = trainer.predict(d_test_haobolabels_hpihc)
-    grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['haobolabels_hpihc'] = y_test
+print('Heldout labels.')
+y_test = trainer.predict(d_heldout)
+print(compute_eval_metrics(y_test,d_heldout['id']))
+test_results['heldout'] = y_test
 
-    print('Testing Haobo labels, HPI only.')
-    y_test = trainer.predict(d_test_haobolabels_hpi)
-    grouped = group_preds(y_test,d_test_haobo['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['haobolabels_hpi'] = y_test
-
-    print('Testing Heldout Haobo labels, HPI-HC.')
-    y_test = trainer.predict(d_heldout_haobolabels_hpihc)
-    grouped = group_preds(y_test,d_heldout['id'])
-    out = majority_vote(grouped,tiebreaker)
-    acc = sum([r[0] for r in out['matches'].values()])/len(out['matches'])
-    y_test = {'results':out,'accuracy':acc}
-    print(acc)
-    test_results['heldout'] = y_test
-    
-else:    
-    
-    print('Testing Haobo set, HPI-HC.')
-    y_test = trainer.predict(d_test_haoboset_hpihc)
-    test_results['haoboset_hpihc'] = y_test
-    print(y_test[2])
-
-    print('Testing ICD set, HPI-HC.')
-    y_test = trainer.predict(d_test_icdset_hpihc)
-    test_results['icdset_hpihc'] = y_test
-    print(y_test[2])
-
-    print('Testing Haobo set, HPI only.')
-    y_test = trainer.predict(d_test_haoboset_hpi)
-    test_results['haoboset_hpi'] = y_test
-    print(y_test[2])
-
-    print('Testing ICD set, HPI only.')
-    y_test = trainer.predict(d_test_icdset_hpi)
-    test_results['icdset_hpi'] = y_test
-    print(y_test[2])
-
-    print('Testing Haobo labels, HPI-HC.')
-    y_test = trainer.predict(d_test_haobolabels_hpihc)
-    test_results['haobolabels_hpihc'] = y_test
-    print(y_test[2])
-
-    print('Testing Haobo labels, HPI only.')
-    y_test = trainer.predict(d_test_haobolabels_hpi)
-    test_results['haobolabels_hpi'] = y_test
-    print(y_test[2])
-
-    print('Testing Heldout Haobo labels, HPI-HC.')
-    y_test = trainer.predict(d_heldout_haobolabels_hpihc)
-    test_results['heldout'] = y_test
-    print(y_test[2])
-
+# save results
 with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:
     pickle.dump(test_results, f)

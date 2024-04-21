@@ -1,124 +1,244 @@
-create_counts <- function(x,mem_save=FALSE){
+create_counts <- function(x,mem_save=FALSE,nurse=FALSE){
   
   cat('\nCreating counts.\n')
   x <- x %>%
     mutate(los=replace(los,is.infinite(los),NA),
            los=replace(los,is.na(los),mean(los,na.rm=TRUE))) %>%
     mutate(
-      count_del=1*str_count(hc,'deliri| cam |cows'),
-      count_postdel=1*str_count(hc,'postop deli|postoperative deli'),
+      count_del=1*str_count(hospital_course,'deliri| cam |cows'),
+      count_postdel=1*str_count(
+        hospital_course,'postop deli|postoperative deli'),
       count_del_dd=1*str_count(discharge_diagnosis,'deliri'),
       count_del_ms=1*str_count(mental_status,'deliri'),
-      count_del_prob=1*str_count(note,'(\\#\\s?deliri|\\d[:punct:]?\\s+delir)|(\\#\\s?postoperative deliri|\\d[:punct:]?\\s+postoperative delir)|(\\#\\s?postop deliri|\\d[:punct:]?\\s+postop delir)'),
-      count_enceph_prob=1*str_count(note,'(\\#\\s?enceph|\\d[:punct:]?\\s+enceph)'),
-      count_metenceph_prob=1*str_count(note,'(\\#\\s?met enceph|\\d[:punct:]?\\s+met enceph)|(\\#\\s?metabolic enceph|\\d[:punct:]?\\s+metabolic enceph)'),
-      count_hepenceph_prob=1*str_count(note,'(\\#\\s?hep enceph|\\d[:punct:]?\\s+hep enceph)|(\\#\\s?hepatic enceph|\\d[:punct:]?\\s+hepatic enceph)'),
-      count_toxenceph_prob=1*str_count(note,'(\\#\\s?tox enceph|\\d[:punct:]?\\s+tox enceph)|(\\#\\s?toxic enceph|\\d[:punct:]?\\s+toxic enceph)'),
-      count_conf_hc=1*str_count(hc,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
-      count_conf_ms=1*str_count(mental_status,'confus|disorient|alter'),
-      count_ao0_ms=1*str_count(mental_status,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
-      count_ao3_ms=1*str_count(mental_status,'(ao|oriented)\\s?x?\\s?(3|three)'),
-      count_ao0_hc=1*str_count(hc,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
-      count_ao3_hc=1*str_count(hc,'(ao|oriented)\\s?x?\\s?(3|three)'),
+      count_del_prob=1*str_count(
+        note,
+        glue('(\\#\\s?deliri|\\d[:punct:]?\\s+delir)|',
+             '(\\#\\s?postoperative deliri|',
+             '\\d[:punct:]?\\s+postoperative delir)|(\\#\\s?postop deliri|',
+             '\\d[:punct:]?\\s+postop delir)')),
+      count_enceph_prob=1*str_count(
+        note,
+        '(\\#\\s?enceph|\\d[:punct:]?\\s+enceph)'),
+      count_metenceph_prob=1*str_count(
+        note,
+        glue('(\\#\\s?met enceph|\\d[:punct:]?\\s+met enceph)|',
+             '(\\#\\s?metabolic enceph|\\d[:punct:]?\\s+metabolic enceph)')),
+      count_hepenceph_prob=1*str_count(
+        note,
+        glue('(\\#\\s?hep enceph|\\d[:punct:]?\\s+hep enceph)|',
+             '(\\#\\s?hepatic enceph|\\d[:punct:]?\\s+hepatic enceph)')),
+      count_toxenceph_prob=1*str_count(
+        note,
+        glue('(\\#\\s?tox enceph|\\d[:punct:]?\\s+tox enceph)|',
+             '(\\#\\s?toxic enceph|\\d[:punct:]?\\s+toxic enceph)')),
+      count_conf_hc=1*str_count(
+        hospital_course,
+        'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
+      count_conf_ms=1*str_count(
+        mental_status,'confus|disorient|alter'),
+      count_ao0_ms=1*str_count(
+        mental_status,
+        glue('((ao|oriented)\\s?x?\\s?(0|zero))|',
+             '((ao|oriented)\\s?x?\\s?(1|one))|',
+             '((ao|oriented)\\s?x?\\s?(2|two))')),
+      count_ao3_ms=1*str_count(
+        mental_status,'(ao|oriented)\\s?x?\\s?(3|three)'),
+      count_ao0_hc=1*str_count(
+        hospital_course,
+        glue('((ao|oriented)\\s?x?\\s?(0|zero))|',
+             '((ao|oriented)\\s?x?\\s?(1|one))|',
+             '((ao|oriented)\\s?x?\\s?(2|two))')),
+      count_ao3_hc=1*str_count(
+        hospital_course,'(ao|oriented)\\s?x?\\s?(3|three)'),
       count_exf=1*str_count(discharge_disposition,'extend|servic'),
       count_hosp=1*str_count(discharge_disposition,'hospice|expir'),
       count_home=1*str_count(discharge_disposition,'home'),
-      count_homeless=1*str_count(hc,'homeless|shelter'),
-      count_schiz=1*str_count(hc,'schizo|delusion|disorganiz|cataton'),
-      count_park=1*str_count(hc,'parkins|dopa|duopa|rytary|sinemet'),
-      count_alz=1*str_count(hc,'alzh|brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
-      count_manic=1*str_count(hc,'manic|mania|bipol|lithium|lumateper|caplyta|idone|latuda|depakote|abilify|saphris|lamictal|aripipr|lamotrig'),
-      count_enceph=1*str_count(hc,'enceph'),
-      count_nsurg=1*str_count(hc,'neurosurg|craniot'),
-      count_psych=1*str_count(hc,'psychiatr'),
-      count_geri=1*str_count(hc,'geriatr'),
-      count_pal=1*str_count(hc,'paliat'),
-      count_inf=1*str_count(hc,'antibiot|bacteremi|mssa|mrsa|sepsi'),
-      count_psych_med=1*str_count(hc,'haloperidol|haldol|olanz|symbyax|precedex|dexmedet|seroquel|quetiapine'),
-      count_ciwa=1*str_count(hc,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
-      count_hep=1*str_count(hc,'hepatit|hepatol|ascit|jaund|cirrh|varices|meld|portal'),
-      count_tox=1*str_count(hc,'toxic'),
-      count_los=los                          # added 1/2/23
+      count_homeless=1*str_count(hospital_course,'homeless|shelter'),
+      count_schiz=1*str_count(
+        hospital_course,'schizo|delusion|disorganiz|cataton'),
+      count_park=1*str_count(
+        hospital_course,'parkins|dopa|duopa|rytary|sinemet'),
+      count_alz=1*str_count(
+        hospital_course,
+        'alzh|brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
+      count_manic=1*str_count(
+        hospital_course,
+        glue('manic|mania|bipol|lithium|lumateper|caplyta|idone|latuda|',
+             'depakote|abilify|saphris|lamictal|aripipr|lamotrig')),
+      count_enceph=1*str_count(hospital_course,'enceph'),
+      count_nsurg=1*str_count(hospital_course,'neurosurg|craniot'),
+      count_psych=1*str_count(hospital_course,'psychiatr'),
+      count_geri=1*str_count(hospital_course,'geriatr'),
+      count_pal=1*str_count(hospital_course,'paliat'),
+      count_inf=1*str_count(
+        hospital_course,'antibiot|bacteremi|mssa|mrsa|sepsi'),
+      count_psych_med=1*str_count(
+        hospital_course,
+        glue('haloperidol|haldol|olanz|symbyax|precedex|dexmedet|',
+             'seroquel|quetiapine')),
+      count_ciwa=1*str_count(
+        hospital_course,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
+      count_hep=1*str_count(
+        hospital_course,
+        'hepatit|hepatol|ascit|jaund|cirrh|varices|meld|portal'),
+      count_tox=1*str_count(hospital_course,'toxic'),
+      count_los=los                          
     ) 
   
-  if (!mem_save){
-    cat('Creating nursing counts.\n')
-    x <- x %>% left_join(read_csv(file.path(path,'data_in','NursingSummariesWithMRN_ID.csv')) %>% 
-                           select(date_nurs=note_dt,mrn,note_nurs=note_txt) %>%
-                           mutate(mrn=as.numeric(mrn)),
-                         by='mrn',relationship='many-to-many') %>%
-      mutate(date_nurs=ymd(date_nurs)) %>%
-      rowwise() %>%
-      mutate(note_overlap=if_else(date_nurs >= date_adm && date_nurs <= date_dc,1,0),
-             note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
-      ungroup() %>%
-      group_by(id) %>%
-      mutate(note_nurs=paste(note_nurs,collapse=' '),
-             n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
-      ungroup() %>%
-      select(-note_overlap,-date_nurs) %>%
-      distinct() %>%
-      mutate(
-        count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
-        count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
-        count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
-        count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
-        count_nurse_pysch_med=1*str_count(note_nurs,'haloperidol|haldol|olanz|symbyax|precedex|dexmedet|seroquel|quetiapine'),
-        count_nurse_bp_med=1*str_count(note_nurs,'lithium|lumateper|caplyta|idone|latuda|depakote|abilify|saphris|lamictal|aripipr|lamotrig'),
-        count_nurse_alz_med=1*str_count(note_nurs,'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
-        count_nurse_wd=1*str_count(note_nurs,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
-        count_nurse_jaund=1*str_count(note_nurs,'ascit|jaund|cirrh|varices|meld')
-      ) 
-  }else{
-    cat('Performing memory save.\n')
-    cat('Saving tmp table.\n')
-    write_rds(x,file.path(path,'data_tmp','raw_counts.rds'))
-    
-    x <- x %>% select(id,mrn,date_adm,date_dc) 
-    
-    cat('Clearing memory.\n')
-    gc()
-    
-    cat('Creating nursing counts.\n')
-    x <- x %>% 
-      distinct() %>% 
-      left_join(read_csv(file.path('D:\\Dropbox\\embeddings\\delirium',
-                                   'data_in',
-                                   'NursingSummariesWithMRN_ID.csv')) %>% 
-                  select(date_nurs=note_dt,mrn,note_nurs=note_txt) %>%
-                  mutate(mrn=as.numeric(mrn)),
-                by='mrn',relationship='many-to-many') %>%
-      mutate(date_nurs=ymd(date_nurs)) %>%
-      rowwise() %>%
-      mutate(note_overlap=if_else(date_nurs >= date_adm && date_nurs <= date_dc,1,0),
-             note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
-      ungroup() %>%
-      group_by(id) %>%
-      mutate(note_nurs=paste(note_nurs,collapse=' '),
-             n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
-      ungroup() %>%
-      select(-note_overlap,-date_nurs) %>%
-      distinct() %>%
-      mutate(
-        count_nurse_del=1*str_count(note_nurs,'deliri| cam |cows'),
-        count_nurse_conf_ms=1*str_count(note_nurs,'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
-        count_nurse_ao0_ms=1*str_count(note_nurs,'((ao|oriented)\\s?x?\\s?(0|zero))|((ao|oriented)\\s?x?\\s?(1|one))|((ao|oriented)\\s?x?\\s?(2|two))'),
-        count_nurse_ao3_ms=1*str_count(note_nurs,'(ao|oriented)\\s?x?\\s?(3|three)'),
-        count_nurse_pysch_med=1*str_count(note_nurs,'haloperidol|haldol|olanz|symbyax|precedex|dexmedet|seroquel|quetiapine'),
-        count_nurse_bp_med=1*str_count(note_nurs,'lithium|lumateper|caplyta|idone|latuda|depakote|abilify|saphris|lamictal|aripipr|lamotrig'),
-        count_nurse_alz_med=1*str_count(note_nurs,'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
-        count_nurse_wd=1*str_count(note_nurs,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
-        count_nurse_jaund=1*str_count(note_nurs,'ascit|jaund|cirrh|varices|meld')
-      )
-    
-    cat('Merging tables.\n')
-    x <- x %>%
-      left_join(read_rds(file.path(path,'data_tmp','raw_counts.rds')),
-                by='id')
-    
+  if (nurse){
+    if (!mem_save){
+      cat('Creating nursing counts.\n')
+      x <- x %>% left_join(read_csv(
+        file.path(path,'data_in','nurs_summaries.csv.gz')) %>% 
+                             select(date_nurs=note_dt,mrn,
+                                    note_nurs=note_txt) %>%
+                             mutate(mrn=as.numeric(mrn)),
+                           by='mrn',relationship='many-to-many') %>%
+        mutate(date_nurs=ymd(date_nurs)) %>%
+        rowwise() %>%
+        mutate(note_overlap=if_else(
+          date_nurs >= date_adm & date_nurs <= date_dc,1,0),
+               note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
+        ungroup() %>%
+        group_by(id) %>%
+        mutate(note_nurs=paste(note_nurs,collapse=' '),
+               n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
+        ungroup() %>%
+        select(-note_overlap,-date_nurs) %>%
+        distinct() %>%
+        mutate(
+          count_nurse_del=1*str_count(
+            note_nurs,'deliri| cam |cows'),
+          count_nurse_conf_ms=1*str_count(
+            note_nurs,
+            'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
+          count_nurse_ao0_ms=1*str_count(
+            note_nurs,
+            glue('((ao|oriented)\\s?x?\\s?(0|zero))|',
+                 '((ao|oriented)\\s?x?\\s?(1|one))|',
+                 '((ao|oriented)\\s?x?\\s?(2|two))')),
+          count_nurse_ao3_ms=1*str_count(
+            note_nurs,
+            '(ao|oriented)\\s?x?\\s?(3|three)'),
+          count_nurse_pysch_med=1*str_count(
+            note_nurs,
+            glue('haloperidol|haldol|olanz|symbyax|precedex|dexmedet|',
+                 'seroquel|quetiapine')),
+          count_nurse_bp_med=1*str_count(
+            note_nurs,
+            glue('lithium|lumateper|caplyta|idone|latuda|depakote|abilify|',
+                 'saphris|lamictal|aripipr|lamotrig')),
+          count_nurse_alz_med=1*str_count(
+            note_nurs,
+            'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
+          count_nurse_wd=1*str_count(
+            note_nurs,
+            'ciwa|alcoho|withdraw|overdos|detox|tremens'),
+          count_nurse_jaund=1*str_count(
+            note_nurs,
+            'ascit|jaund|cirrh|varices|meld')
+        ) 
+    }else{
+      cat('Performing memory save.\n')
+      cat('Saving tmp table.\n')
+      write_rds(x,file.path(path,'data_tmp','raw_counts.rds'))
+      
+      x <- x %>% select(id,mrn,date_adm,date_dc) 
+      
+      cat('Clearing memory.\n')
+      gc()
+      
+      cat('Creating nursing counts.\n')
+      x <- x %>% 
+        distinct() %>% 
+        left_join(read_csv(
+          file.path('D:\\Dropbox\\embeddings\\delirium',
+                    'data_in',
+                    'nurs_summaries.csv.gz')) %>% 
+                    select(date_nurs=note_dt,mrn,note_nurs=note_txt) %>%
+                    mutate(mrn=as.numeric(mrn)),
+                  by='mrn',relationship='many-to-many') %>%
+        mutate(date_nurs=ymd(date_nurs)) %>%
+        rowwise() %>%
+        mutate(note_overlap=if_else(
+          date_nurs >= date_adm && date_nurs <= date_dc,1,0),
+               note_nurs=if_else(note_overlap == 1,note_nurs,NA)) %>%
+        ungroup() %>%
+        group_by(id) %>%
+        mutate(note_nurs=paste(note_nurs,collapse=' '),
+               n_nurs=sum(note_overlap,na.rm=TRUE)) %>%
+        ungroup() %>%
+        select(-note_overlap,-date_nurs) %>%
+        distinct() %>%
+        mutate(
+          count_nurse_del=1*str_count(
+            note_nurs,
+            'deliri| cam |cows'),
+          count_nurse_conf_ms=1*str_count(
+            note_nurs,
+            'confus|disorient|waxing|sundowni|sun downi|restrain|halluc'),
+          count_nurse_ao0_ms=1*str_count(
+            note_nurs,
+            glue('((ao|oriented)\\s?x?\\s?(0|zero))|',
+                 '((ao|oriented)\\s?x?\\s?(1|one))|',
+                 '((ao|oriented)\\s?x?\\s?(2|two))')),
+          count_nurse_ao3_ms=1*str_count(
+            note_nurs,
+            '(ao|oriented)\\s?x?\\s?(3|three)'),
+          count_nurse_pysch_med=1*str_count(
+            note_nurs,
+            glue('haloperidol|haldol|olanz|symbyax|precedex|dexmedet|',
+                 'seroquel|quetiapine')),
+          count_nurse_bp_med=1*str_count(
+            note_nurs,
+            glue('lithium|lumateper|caplyta|idone|latuda|depakote|abilify|',
+                 'saphris|lamictal|aripipr|lamotrig')),
+          count_nurse_alz_med=1*str_count(
+            note_nurs,
+            'brexpip|donepe|galant|memant|rivastig|aricept|exelon|razadyne'),
+          count_nurse_wd=1*str_count(
+            note_nurs,
+            'ciwa|alcoho|withdraw|overdos|detox|tremens'),
+          count_nurse_jaund=1*str_count(
+            note_nurs,
+            'ascit|jaund|cirrh|varices|meld')
+        )
+      
+      cat('Merging tables.\n')
+      x <- x %>%
+        left_join(read_rds(file.path(path,'data_tmp','raw_counts.rds')),
+                  by='id')
+      
+    }
   }
   
   return(x)
+  
+}
+
+upsamp <- function(x,label_name='label'){
+  
+  x <- x %>%
+    rename(label=label_name)
+  
+  n_1 <- sum(x$label == 1)
+  n_0 <- sum(x$label == 0)
+  n_upsamp_max <- max(c(n_0,n_1))
+  n_upsamp_min <- min(c(n_0,n_1))
+  n_upsamp <- round(n_upsamp_max/n_upsamp_min)
+  train <- tibble()
+  for (j in 1:n_upsamp){
+    train <- train %>%
+      bind_rows(x %>%
+                  group_by(label) %>%
+                  sample_n(n_upsamp_min,replace=TRUE) %>%
+                  ungroup())
+  }
+  
+  x <- x %>%
+    rename(!!label_name := label)
+  
+  return(train)
   
 }
 
@@ -163,19 +283,21 @@ chunk_nonoverlap <- function(x,n=4096){
 }
 
 chunk <- function(x,n=4096){
-  L <- nchar(txt)
+  L <- nchar(x)
   R <- ceiling(L/n)
   skip <- floor(L/R)
   
-  front <- str_trim(substr(txt,1,n))
-  back <- str_trim(substr(txt,L-n+1,L))
+  front <- str_trim(substr(x,1,n))
+  back <- str_trim(substr(x,L-n+1,L))
   
   ss <- c(front,back)
   
-  for (i in seq_len(R-2)){
-    start <- i * skip
-    end <- start + n - 1
-    ss <- c(ss,str_trim(substr(txt,start,end)))
+  if (R > length(ss)){
+    for (i in seq_len(R-2)){
+      start <- i * skip
+      end <- start + n - 1
+      ss <- c(ss,str_trim(substr(x,start,end)))
+    }
   }
   
   return(list(ss))
@@ -218,3 +340,100 @@ process_features <- function(x,n=50){
 }
 
 z <- function(x) (x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
+
+med_list <- function(x){
+  if (is.na(x)) return(list(NA))
+  
+  sep_comma <- str_count(x,'[:alnum:]\\, ')
+  sep_digit <- str_count(x,'[:digit:]\\. ')
+  
+  if (sep_digit > sep_comma){
+    x <- str_replace(x,'^.*?(?=\\d{1,2}\\.)','')
+    x <- str_split(x,'\\d{1,2}\\.')[[1]]
+    x <- str_replace_all(x,'[[:digit:]]|[[:punct:]]|\\$|\\^|\\+|\\<|\\>|\\=','')
+    x <- str_squish(x)
+    x <- str_match(x,'^([A-Za-z]+)*')[,2]
+  }else if (sep_comma > sep_digit){
+    x <- str_replace(x,'^.*?(?=\\s\\w+,)','')
+    x <- str_split(x,',')[[1]]
+    x <- str_replace_all(x,'[[:digit:]]|[[:punct:]]|\\$|\\^|\\+|\\<|\\>|\\=','')
+    x <- str_squish(x)
+    x <- str_match(x,'^([A-Za-z]+)*')[,2]
+  }else if (sep_comma + sep_digit == 0){
+    x <- str_replace_all(x,'[[:digit:]]|[[:punct:]]|\\$|\\^|\\+|\\<|\\>|\\=','')
+    x <- str_squish(x)
+    x <- str_match(x,'^([A-Za-z]+)*')[,2]
+  }else{
+    return(list(NA))
+  }
+  
+  if (length(x) == 1 && (x == 'none' | is.na(x))) return(list(NA))
+  
+  x <- x[!is.na(x)]
+  x <- x[nchar(x) > 2]
+  x <- x[!(x %in% c('mg','mcg','g','ml'))]
+  x <- list(x)
+  return(x)
+}
+
+clean_text <- function(x){
+  x <- str_squish(
+    str_replace_all(x,'[[:punct:]][[:digit:]]|[[:digit:]]|\\*|\\:',''))
+  x <- str_replace_all(x,' , ',', ')
+  return(x)
+}
+
+allergy_list <- function(x){
+  x <- str_squish(str_replace_all(x,'\\s+',' '))
+  x <- unlist(str_split(x,' / '))
+  len <- which(nchar(x) > 50)
+  if (length(len) > 0) x <- x[len[1] - 1]
+  x <- unique(x)
+  x <- x[x != 'adverse drug reactions']
+  x <- list(x)
+  return(x)
+}
+
+aox <- function(x){
+  x <- str_replace_all(x,'ao\\s?x?\\s?1|oriented\\s?x?\\s?1','aoxone')
+  x <- str_replace_all(x,'ao\\s?x?\\s?2|oriented\\s?x?\\s?2','aoxtwo')
+  x <- str_replace_all(x,'ao\\s?x?\\s?3|oriented\\s?x?\\s?3','aoxthree')
+  x <- str_replace_all(x,'ao\\s?x?\\s?0|oriented\\s?x?\\s?0','aoxzero')
+  x <- str_replace_all(x,'\\s+',' ')
+  x <- str_replace_all(x,'[[:punct:]][[:punct::]]',' ')
+  x <- str_replace_all(x,'[[:punct:]] [[:punct:]]',' ')
+  x <- str_replace_all(x,' [[:punct:]]',' ')
+  x <- str_replace_all(x,'\\s+',' ')
+}
+
+pmhx <- function(x){
+  x <- str_replace_all(x,'\\/','')
+  x <- str_replace_all(x,'[[:digit:]]|[[:punct:]]',' ')
+  x <- str_replace_all(x,'\\s+',' ')
+  x <- str_squish(x)
+}
+
+icd_check <- function(code,reference){
+  if (!is.na(code)){
+    if (code %in% reference){
+      return(code)
+    } else {
+      return(NA)
+    }
+  } else {
+    return(NA)
+  }
+}
+
+majority_vote <- function(predictions,labels){
+  
+  x <- tibble(id=rownames(predictions),pred=predictions[,1],lab=labels) %>%
+    group_by(id) %>%
+    mutate(max_pred=max(abs(0.5-pred))) %>%
+    ungroup() %>%
+    filter(abs(0.5-pred) == max_pred) %>%
+    select(-max_pred) %>%
+    mutate(pred=as.character(if_else(pred >= 0.5,1,0)))
+
+  return(x)
+}
