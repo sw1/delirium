@@ -190,7 +190,7 @@ for (j in seq_along(fns)){
                     conf$byClass[6],
                     conf$byClass[7],
                     table(mv$pred)[2]/length(mv$pred))
-      names(perf_tmp)[5] <- 'Proportion 1'
+      names(perf_tmp) <- c('bacc','prec','rec','f1','prop1')
       
       perf <- rbind(perf,perf_tmp)
     }
