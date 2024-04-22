@@ -18,6 +18,8 @@ data_tmp/*
 data_tmp/
 to_python/*
 to_python/
+res/*
+res/
 sync/*
 sync/
 sync/sync_script.sh
