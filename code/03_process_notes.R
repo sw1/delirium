@@ -6,7 +6,7 @@ library(lubridate)
 library(tm)
 library(glue)
 
-# cript to preprocess notes into specific categories and remove various
+# script to preprocess notes into specific categories and remove various
 # types of characters etc.
 
 if (Sys.info()['login'] == 'sw1'){
@@ -17,7 +17,7 @@ if (Sys.info()['login'] == 'sw424'){
 }
 source(file.path(path,'code','fxns.R'))
 
-tbl_full <- read_rds(file.path(path,'data_in','full_icd_tbl.rds'))
+tbl_full <- read_rds(file.path(path,'data_in','02_merged_icd_tbl.rds'))
 
 # split notes into sections by iterating over 200000 rows at a time
 # to save memory.
@@ -172,12 +172,88 @@ tbl <- tbl %>%
                       collapse=' ')) %>%
   ungroup() 
 
+# mutate some variables for st
+tbl <- tbl %>%
+  mutate(los=if_else(!is.na(length_of_stay),length_of_stay,los),
+         sex=if_else(sex == 'female',0,if_else(sex == 'male',1,NA)),
+         age=if_else(!is.na(age),age,date_of_birth-admission_date))
+
+write_rds(tbl,file.path(path,'data_out','03_tbl_final_beforeinterp.rds'))
+
+# interp age, sex, los, discharge/admission dates, term_count_hpi
+tbl <- tbl %>%
+  mutate(bucket_age=ntile(age,10),
+         bucket_num_meds=ntile(num_meds,4),
+         bucket_len_pmhx=ntile(len_pmhx,4)) %>%
+  group_by(across(starts_with('bucket')),service) %>%
+  mutate(los=if_else(is.na(los),mean(los,na.rm=TRUE),los)) %>%
+  ungroup() %>%
+  mutate(bucket_los=ntile(los,4)) %>%
+  group_by(bucket_num_meds,bucket_len_pmhx,bucket_los,service) %>%
+  mutate(age=if_else(is.na(age),mean(age,na.rm=TRUE),age)) %>%
+  ungroup() %>%
+  mutate(bucket_age=ntile(age,10)) %>%
+  mutate(discharge_date=if_else(is.na(discharge_date),
+                                date_dc,
+                                discharge_date),
+         admission_date=if_else(is.na(admission_date),
+                                date_adm,
+                                admission_date),
+         discharge_date=if_else(is.na(discharge_date),
+                                admission_date + los,
+                                discharge_date),
+         admission_date=if_else(is.na(admission_date),
+                                discharge_date - los,
+                                admission_date)) %>%
+  select(-date_adm,-date_dc,length_of_stay) %>% 
+  mutate(age=as.integer(round(age)),
+         age=if_else(id == 477879,40,age),
+         admission_date=if_else(id == 477879,
+                                date_of_birth + age,
+                                admission_date),
+         discharge_date=if_else(id == 477879,
+                                admission_date + los,
+                                discharge_date)) %>%
+  group_by(across(starts_with('bucket')),service) %>%
+  mutate(term_count_hpi=if_else(is.na(term_count_hpi),
+                                round(mean(term_count_hpi,na.rm=TRUE)),
+                                term_count_hpi)) %>%
+  ungroup() %>%
+  select(-starts_with('bucket'))
+
+# fix sex missing values
+tbl <- tbl %>%
+  mutate(sex=if_else(is.na(sex),
+                     case_when(
+                       service == 'obstetrics/gynecology' ~ 0,
+                       str_detect(hpi_hc,glue('^ms|^mrs|^miss|^f |',
+                                              '^sister |yo f')) ~ 0,
+                       str_detect(hpi_hc,'^mr|^m |^father |yo m') ~ 1,
+                       str_detect(hpi_hc,'female|woman|lady') ~ 0,
+                       str_detect(hpi_hc,'male|gentleman|man') ~ 1,
+                       str_detect(hpi_hc,'she|her') ~ 1,
+                       str_detect(hpi_hc,'he|his') ~ 0,
+                       TRUE ~ NA),
+                     sex)) 
+
+# estimate len_pmhx if missing
+tbl <- tbl %>%
+  mutate(len_pmhx=ifelse(is.na(len_pmhx),
+                         estimate_len_pmhx(hpi_hc),
+                         len_pmhx)) 
+
+# filter hc <= 50 or concat hpi_hc <= 100 from full table
+tbl <- tbl %>%
+  filter(
+    nchar(hospital_course) > 50 | str_detect(hospital_course,'see hpi')) %>%
+  filter(nchar(hpi_hc) > 100)
+
 # save the final table with period
-write_rds(tbl,file.path(path,'data_in','tbl_final_wperiods.rds'))
+write_rds(tbl,file.path(path,'data_in','03_tbl_final_wperiods.rds'))
 
 # remove periods from the final table and save
 tbl <- tbl %>%
   mutate_at(c('history_of_present_illness','hospital_course'),
             ~str_squish(trimws(str_replace_all(.x,'[[:punct:]]',''))))
 
-write_rds(tbl,file.path(path,'data_in','tbl_final.rds'))
+write_rds(tbl,file.path(path,'data_in','03_tbl_final.rds'))

@@ -22,8 +22,8 @@ cl <- makePSOCKcluster(all_cores,outfile=outfile)
 registerDoParallel(cl)
 
 m <- 'f_meas'
-thresholds <- c(0.85,0.7) # thresholds for pseudo label
-n_features <- c(75,150) # number of features to use
+thresholds <- c(0.80,0.7) # thresholds for pseudo label
+n_features <- c(50,125) # number of features to use
 seeds <- c(1834,4532,8010) # random seeds
 tol <- 50 # tolerance for stopping early
 tol_stop <- 2 # number of times to hit tolerance before stopping
@@ -53,13 +53,13 @@ out <- foreach(i=1:nrow(combs),.combine='c',
              '))
     
     tree_fit <- read_rds(
-      file.path(path,'data_in','fit_st_rf.rds'))
+      file.path(path,'data_in','06_fit_st_rf.rds'))
 
     # full feature set that was used for initial training
-    features <- training(tree_fit$split) %>%
-      select(-label) %>%
-      colnames() %>%
-      paste('^',.,'$',sep='')
+    # features <- training(tree_fit$split) %>%
+    #   select(-label) %>%
+    #   colnames() %>%
+    #   paste('^',.,'$',sep='')
     
     # subset of features after subset selection
     features_subset <- tree_fit$features %>% 
@@ -69,10 +69,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',
     
     # load dataset and filter features
     master <- read_rds(
-      file.path(path,'data_in','alldat_preprocessed_for_pred.rds')) %>%
-      select(id,set,label,matches(features)) %>%
-      mutate(label=as.factor(label)) %>%
-      mutate(across(where(is.numeric),~replace_na(.x, 0))) %>%
+      file.path(path,'data_in','07_alldat_preprocessed_for_pred.rds')) %>%
       select(id,set,label,matches(features_subset))
     
     # heldout set
@@ -257,4 +254,4 @@ stopCluster(cl)
 cat(glue('All iterations complete: saving results'))
 
 write_rds(list(combs=combs,out=out),
-          file.path(path,'data_tmp','labels_rfst_count_del_full.rds'))
+          file.path(path,'data_tmp','08_labels_rfst_count_del_full.rds'))

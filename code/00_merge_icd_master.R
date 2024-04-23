@@ -38,5 +38,5 @@ master <- read_csv(file.path(path,'data_in','notes.csv.gz')) %>%
   filter(date_adm_master <= date_adm_icd & date_adm_icd <= date_dc_master) %>%
   distinct() 
 
-write_rds(master,file.path(path,'data_in','icd_master.rds'))
+write_rds(master,file.path(path,'data_in','00_icd_master.rds'))
   

@@ -54,12 +54,19 @@ master <- master %>%
   left_join(icds,by=c('code','code_type')) %>%
   group_by(id,set) %>%
   reframe(icd_codes=list(na.exclude(unique(code)))) %>%
-  left_join(read_rds(file.path(path,'data_in','tbl_final_wperiods.rds')) %>%
+  left_join(read_rds(file.path(path,'data_in','03_tbl_final_wperiods.rds')) %>%
               rename(icd_codes_del=icd_codes), 
             by='id') %>%
   distinct()
 
+# final preprocessing before saving master table
+master <- master %>%
+  mutate(los=as.numeric(los),
+         discharge_date=as.numeric(discharge_date),
+         len_pmhx=as.numeric(len_pmhx),
+         label=as.factor(label)) 
 
-write_rds(master,file.path(path,'data_in','full_icd_tbl.rds'))
+
+write_rds(master,file.path(path,'data_in','05_full_icd_tbl.rds'))
 
 

@@ -2,8 +2,6 @@ create_counts <- function(x,mem_save=FALSE,nurse=FALSE){
   
   cat('\nCreating counts.\n')
   x <- x %>%
-    mutate(los=replace(los,is.infinite(los),NA),
-           los=replace(los,is.na(los),mean(los,na.rm=TRUE))) %>%
     mutate(
       count_del=1*str_count(hospital_course,'deliri| cam |cows'),
       count_postdel=1*str_count(
@@ -82,7 +80,6 @@ create_counts <- function(x,mem_save=FALSE,nurse=FALSE){
         hospital_course,
         'hepatit|hepatol|ascit|jaund|cirrh|varices|meld|portal'),
       count_tox=1*str_count(hospital_course,'toxic'),
-      count_los=los                          
     ) 
   
   if (nurse){
@@ -216,10 +213,21 @@ create_counts <- function(x,mem_save=FALSE,nurse=FALSE){
   
 }
 
+estimate_len_pmhx <- function(x){
+  
+  y <- gsub('\\..*','',x)
+  y <- gsub('pres.*','',y)
+  y <- gsub('[[:punct:]]','',y)
+  y <- nchar(str_squish(y))
+  
+  return(y)
+  
+}
+
 upsamp <- function(x,label_name='label'){
   
   x <- x %>%
-    rename(label=label_name)
+    rename(label=any_of(label_name))
   
   n_1 <- sum(x$label == 1)
   n_0 <- sum(x$label == 0)

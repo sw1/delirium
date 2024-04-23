@@ -53,7 +53,7 @@ icd10_match <- icd10_match %>%
 # process the data from the icds.csv.gz file
 # cleanup dates, times, and case identifiers
 # match case icds with filtered icd lists then group them as lists
-master <- read_rds(file.path(path,'data_in','icd_master.rds')) %>%
+master <- read_rds(file.path(path,'data_in','00_icd_master.rds')) %>%
   left_join(read_csv(file.path(path,'data_in','icds.csv.gz')) %>%
               select(id=rdr_id,
                      mrn,
@@ -86,4 +86,4 @@ master <- read_rds(file.path(path,'data_in','icd_master.rds')) %>%
 write_rds(list(icds=master,
                icd9_match=icd9_match,icd10_match=icd10_match,
                words_lookup=words_lookup),
-          file.path(path,'data_in','icd_tbl.rds'))
+          file.path(path,'data_in','01_icd_tbl.rds'))

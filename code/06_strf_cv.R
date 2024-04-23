@@ -28,7 +28,7 @@ n_folds <- 10 # cv folds per parameter level
 col_filter <- 50 # filter  features with less than this many sample occurrences
 m <- 'f_meas' # metric to optimize
 
-master <- read_rds(file.path(path,'data_in','full_icd_tbl.rds')) %>%
+master <- read_rds(file.path(path,'data_in','05_full_icd_tbl.rds')) %>%
   filter(!is.na(label))  # turn off for full data, note heldout removed below
 
 # create icd indicators
@@ -74,7 +74,14 @@ master <- master %>%
 # create metadata
 master <- create_counts(master,nurse=FALSE)
 
-# take out heldout set for end
+# select features to be used for rfst
+master <- master %>%
+  select(id,set,label,los,discharge_date,sex,age,num_meds,num_allergies,
+         len_pmhx,term_count_hc,term_count_hpi,
+         starts_with('icd_'),starts_with('count_')) %>%
+  select(-icd_sum) 
+
+# take out heldout to upsample training data
 heldout <- master %>%
   filter(set=='heldout_expert')
 
@@ -83,25 +90,16 @@ master <- master %>%
 
 # upsample smaller class for balanced training
 set.seed(12)
-train <- upsamp(master)
+master <- upsamp(master)
 
-filt <- train %>%
-  select(set,where(is.numeric)) %>%
-  mutate(across(everything(),~replace_na(.x, 0))) %>%
-  colnames()
+# rebind heldout set
+master <- master %>% 
+  bind_rows(heldout) 
 
-# create feature table with heldout and training data
-master <- train %>% 
-  select(all_of(filt)) %>%
-  bind_rows(heldout %>% select(all_of(filt))) %>%
-  mutate(across(everything(),~replace_na(.x, 0))) %>%
-  select(id, label, set,
-         starts_with('icd_'),
-         starts_with('los'),
-         starts_with('count_')) %>%
-  select(-icd_sum) %>%
-  mutate(label=as.factor(label)) 
-
+# replace missing values with 0 and normalize features
+master <- master %>%
+  mutate(across(everything(),~replace_na(.x, 0)))
+  
 cat(glue('\nNumber of features: {ncol(master)-3}.\n\n'))
 
 d_split <- make_splits(x=master %>% 
@@ -111,7 +109,7 @@ d_split <- make_splits(x=master %>%
                          filter(set == 'heldout_expert') %>% 
                          select(-id,-set))
 
-write_rds(master,file.path(path,'data_in','dat_st_rf.rds'))
+write_rds(master,file.path(path,'data_in','06_dat_st_rf.rds'))
 rm(master)
 
 d_train <- training(d_split)
@@ -181,7 +179,7 @@ features <- rf %>%
   .$data
 
 write_rds(list(fit=fit,wf=wf,split=d_split,features=features),
-          file.path(path,'data_in','fit_st_rf.rds'))
+          file.path(path,'data_in','06_fit_st_rf.rds'))
 
 stopCluster(cl)
 

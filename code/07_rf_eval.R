@@ -17,10 +17,9 @@ if (Sys.info()['login'] == 'sw424'){
 source(file.path(path,'code','fxns.R'))
 
 mets <- metric_set(accuracy, sens, yardstick::spec, f_meas, roc_auc)
-
-tree_fit <- read_rds(file.path(path,'data_in','fit_st_rf.rds'))
-
 m <- 'f_meas'
+
+tree_fit <- read_rds(file.path(path,'data_in','06_fit_st_rf.rds'))
 
 best_tree <- tree_fit$fit %>% 
   select_by_pct_loss(metric=m,limit=5,desc(min_n),desc(mtry))
@@ -59,3 +58,5 @@ final_fit %>%
   roc_curve(label, .pred_0) %>% 
   autoplot()
 
+tree_fit$features %>%
+  print(n=125)

@@ -33,7 +33,7 @@ label_update_0 <- c(617387)
 tbl <- read_csv(file.path(path,'data_in','notes.csv.gz')) %>%
   mutate(label=if_else(keyword_yn == 1,postop_delirium_yn,NA)) %>%
   select(id=rdr_id,label,note=note_txt,case=internalcaseid_deid_rdr) %>%
-  left_join(read_rds(file.path(path,'data_in','icd_tbl.rds'))$icds,
+  left_join(read_rds(file.path(path,'data_in','01_icd_tbl.rds'))$icds,
             by='id') %>%
   left_join(read_csv(file.path(path,'data_in','concordance_labels.csv.gz')) %>%
               select(case=internalcaseid_deid_rdr,label_conc=adjudicator),
@@ -70,7 +70,7 @@ tbl <- bind_rows(tbl,dups) %>%
                            if_else(icd_sum > 0,1,0),
                            NA))
   
-write_rds(tbl,file.path(path,'data_in','full_icd_tbl.rds'))
+write_rds(tbl,file.path(path,'data_in','02_merged_icd_tbl.rds'))
 
 
 

@@ -15,16 +15,15 @@ source(file.path(path,'code','fxns.R'))
 
 gc()
 
-master <- read_rds(file.path(path,'data_in','full_icd_tbl.rds'))
+master <- read_rds(file.path(path,'data_in','05_full_icd_tbl.rds'))
 
 # load features used during rf training to filter unused features
 features <- training(
-  read_rds(file.path(path,'data_in','fit_st_rf.rds'))$split) %>%
+  read_rds(file.path(path,'data_in','06_fit_st_rf.rds'))$split) %>%
   select(-label) %>%
   colnames() 
 
-features_train <- gsub('icd_','',
-                 features[!str_detect(features,'^count_|^los_')])
+features_train <- gsub('icd_','',features[str_detect(features,'^icd_')])
 
 features_icds <- unique(unlist(master %>% pull(icd_codes)))
 features_icds <- features_icds[features_icds %in% features_train]
@@ -75,11 +74,16 @@ master <- create_counts(master)
 
 # filter unused features using feature list from above
 master <- master %>%
-  select(!starts_with(c('icd_','count_','los_')),matches(features))
+  select(id,set,label,matches(features)) 
+  #select(!starts_with(c('icd_','count_','los_')),matches(features))
+
+# replace na with 0
+master <- master %>%
+  mutate(across(where(is.numeric),~replace_na(.x, 0))) 
 
 write_rds(master,file.path(path,
                           'data_in',
-                          'alldat_preprocessed_for_pred.rds'))
+                          '07_alldat_preprocessed_for_pred.rds'))
 
 
 

@@ -20,11 +20,9 @@ source(file.path(path,'code','fxns.R'))
 
 # filter hc <= 50 or concat hpi_hc <= 100 from full table
 # 154267 samples
-tbl <- read_rds(file.path(path,'data_in','tbl_final_wperiods.rds')) %>%
+tbl <- read_rds(file.path(path,'data_in','03_tbl_final_wperiods.rds')) %>%
   select(id,hpi=history_of_present_illness,hc=hospital_course,
-         label,label_icd,hpi_hc) %>%
-  filter(nchar(hc) > 50 | str_detect(hc,'see hpi')) %>%
-  filter(nchar(hpi_hc) > 100)
+         label,label_icd,hpi_hc) 
 
 cat(glue('\n\nNumber of total samples: {nrow(tbl)}\n\n'))
 
@@ -38,16 +36,11 @@ cat(glue('\n\nNumber of expert labeled samples: {nrow(tbl_test_expert)}\n\n'))
 
 # pull 300 samples from expert set for heldout
 set.seed(1234)
-n_ho0 <- 150
-n_ho1 <- 150
-tbl_heldout_expert <- bind_rows(tbl_test_expert %>%
-                                  filter(label == 0) %>%
-                                  sample_n(n_ho0,replace=FALSE) %>%
-                                  mutate(set='heldout_expert'),
-                                tbl_test_expert %>%
-                                  filter(label == 1) %>%
-                                  sample_n(n_ho1,replace=FALSE) %>%
-                                  mutate(set='heldout_expert'))
+tbl_heldout_expert <- tbl_test_expert %>%
+  group_by(label) %>%
+  sample_n(150,replace=FALSE) %>%
+  ungroup() %>%
+  mutate(set='heldout_expert')
 
 cat(glue('\n\nNumber of heldout samples: {nrow(tbl_heldout_expert)}\n\n'))
 
