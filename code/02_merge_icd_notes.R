@@ -1,10 +1,5 @@
-library(tidyverse)
-library(tm)
-library(textstem)
-library(tidytext)
-library(lubridate)
-library(text2vec)
-library(stopwords)
+pacman::p_load((tidyverse,tmcleanr,tm,textstem,tidytext,
+                lubridate,text2vec,stopwords)
 
 # read icd_table.rds containing all case ids and icd codes and merge
 # that file with expert labels from notes.csv.gz and

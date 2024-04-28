@@ -1,9 +1,4 @@
-library(tidyverse)
-library(textstem)
-library(parallel)
-library(tidytext)
-library(lubridate)
-library(icd.data)
+pacman::p_load(tidyverse,textstem,tidytext,lubridate,icd.data)
 
 # script to process all_icd_codes.csv file to create a table of icd codes
 

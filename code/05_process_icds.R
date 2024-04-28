@@ -1,6 +1,4 @@
-library(tidymodels)
-library(tidyverse)
-library(icd.data)
+pacman::p_load(tidyverse,icd.data)
 
 # script to merge icds and notes 
 

@@ -1,10 +1,4 @@
-library(text2vec)
-library(stopwords)
-library(glmnet)
-library(tidyverse)
-library(doParallel)
-library(caret)
-library(glue)
+pacman::p_load(text2vec,stopwords,glmnet,tidyverse,doParallel,caret,glue)
 
 # script to perform lasso on doc embeddings
 

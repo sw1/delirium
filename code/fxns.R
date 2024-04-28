@@ -445,3 +445,11 @@ majority_vote <- function(predictions,labels){
 
   return(x)
 }
+
+get_node_size <- function(param,x){
+  
+  ns <- floor(quantile(1:nrow(x),param))
+  
+  return(unname(ns))
+  
+}

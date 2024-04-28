@@ -1,5 +1,4 @@
-library(tidyverse)
-library(glue)
+pacman::p_load(tidyverse,glue)
 
 # script to create a table for training, validation, and testing
 

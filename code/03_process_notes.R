@@ -1,10 +1,4 @@
-library(tidyverse)
-library(textstem)
-library(parallel)
-library(tidytext)
-library(lubridate)
-library(tm)
-library(glue)
+pacman::p_load(tidyverse,textstem,tidytext,lubridate,tm,glue)
 
 # script to preprocess notes into specific categories and remove various
 # types of characters etc.
@@ -115,7 +109,7 @@ for (i in 1:(length(breaks)-1)){
                                         'fluctuat|confus|encephalopathic|',
                                         'sundowni|sun downi|disorient|',
                                         'reoritent|agitat|disinhib|',
-                                        'aox(one|two|three)|haloperidol|',
+                                        'aox(zero|one)|haloperidol|',
                                         'haldol|olanz|precedex|',
                                         'dexmedetomidine|restrain|seroquel|',
                                         'quetiapine|constipat|oliguri|',
@@ -134,7 +128,7 @@ for (i in 1:(length(breaks)-1)){
                                          '|combat|disorgan|altered|fluctuat|',
                                          'confus|encephalopathic|sundowni|',
                                          'sun downi|disorient|reoritent|',
-                                         'agitat|disinhib|aox(one|two|three)|',
+                                         'agitat|disinhib|aox(zero|one)|',
                                          'haloperidol|haldol|olanz|precedex|',
                                          'dexmedetomidine|restrain|seroquel|',
                                          'quetiapine|constipat|oliguri|',

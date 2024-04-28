@@ -1,8 +1,4 @@
-library(text2vec)
-library(stopwords)
-library(tidyverse)
-library(tm)
-library(glue)
+pacman::p_load(text2vec,stopwords,tidyverse,tm,glue)
 
 # script to create vocab, dtm, and tcm for glove
 

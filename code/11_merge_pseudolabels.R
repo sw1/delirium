@@ -1,5 +1,4 @@
-library(tidyverse)
-library(glue)
+pacman::p_load(tidyverse,glue)
 
 # script to merge pseudolabels with notes table
 
@@ -36,6 +35,7 @@ tbl <- tbl %>%
 # plan for an expert test set of 1000 (500/500) and will rename
 # remaining examples as train_expert
 
+set.seed(2)
 ids_test_expert <- tbl %>% 
   filter(set == 'test_expert') %>%
   select(id,label) %>%
@@ -62,11 +62,17 @@ maj_vote <- list()
 for (fn in fns){
   
   # get parameters from filenames
-  params <- str_match(fn,'th(\\d+)_nfeat(\\d+)_seed(\\d+)')[,2:4]
+  params <- str_replace(fn,'^.*\\/','')
+  params <- str_replace(params,'\\.csv\\.gz','')
+  params <- str_split(params,'_')[[1]]
+  params <- params[str_detect(params,'[[:digit:]]')]
+  params <- str_match(params,'(\\D+)(\\d+\\.?\\d*)')
   
-  th <- params[1]
-  f <- params[2]
-  s <- params[3]
+  params_tmp <- params[,3]
+  names(params_tmp) <- params[,2]
+  params <- params_tmp
+  
+  params['th'] <- as.character(as.numeric(params['th'])*100)
 
   new_labels <- read_csv(fn)
   
@@ -77,26 +83,28 @@ for (fn in fns){
     mutate(label_pseudo=if_else(is.na(label_pseudo),-1,label_pseudo)) 
   
   fn_out <- glue('tbl_to_python_expertupdate_chunked_rfst_',
-                 'th{th}_nfeat{f}_seed{s}.csv.gz')
+                 "th{params['th']}_ns{params['ns']}_",
+                 "seed{params['seed']}.csv.gz")
   write_csv(tbl_update,file.path(path,'to_python',fn_out))
 
   # try to append labels for seed s to df with df of labels from other seeds
   # but if df does not yet exist, create it
-  maj_vote[[th]][[f]] <- try(maj_vote[[th]][[f]] %>%
-                               full_join(new_labels,by='id'),
-                             silent=TRUE)
-  if (class(maj_vote[[th]][[f]])[1] == 'try-error'){
-    maj_vote[[th]][[f]] <- new_labels
+  maj_vote[[params['th']]][[params['ns']]] <- try(
+    maj_vote[[params['th']]][[params['ns']]] %>%
+      bind_cols(tbl_update %>% select(label_pseudo)))
+  if (class(maj_vote[[params['th']]][[params['ns']]])[1] == 'try-error'){
+    maj_vote[[params['th']]][[params['ns']]] <- tbl_update %>% 
+      select(label_pseudo)
   }
   
 }
 
 # get majority vote for each threshold and feature set
 for (th in names(maj_vote)){
-  for (f in names(maj_vote[[th]])){
+  for (ns in names(maj_vote[[th]])){
   
     # skip if only one seed
-    if (ncol(maj_vote[[th]][[f]]) < 3) next
+    if (ncol(maj_vote[[th]][[ns]]) < 3) next
     
     # get majority vote across seeds based on median
     # if median does not result in an integer (hence a tie),
@@ -104,25 +112,24 @@ for (th in names(maj_vote)){
     # then merge with original data. Did it the way below
     # since its faster than median(c_across())
 
-    vote <- maj_vote[[th]][[f]] %>% 
+    vote <- maj_vote[[th]][[ns]] %>% 
       select(starts_with('label')) %>%
       as.matrix() 
+    
     vote <- apply(vote,1,function(x){
       x <- median(x,na.rm=TRUE)
       x <- if (x %% 1 == 0.5) -1 else x
       return(x)
     })
     
-    maj_vote[[th]][[f]] <- maj_vote[[th]][[f]] %>%
-      select(id) %>%
-      mutate(label_pseudo=vote)
+    vote <- tibble(label_pseudo=vote)
     
-    maj_vote[[th]][[f]] <- tbl %>%
-      left_join(maj_vote[[th]][[f]],by='id')
+    tbl_update <- tbl %>%
+      bind_cols(vote)
     
     fn_out <- glue('tbl_to_python_expertupdate_chunked_rfst_majvote_',
-                   'th{th}_nfeat{f}.csv.gz')
-    write_csv(maj_vote[[th]][[f]],file.path(path,'to_python',fn_out))
+                   'th{th}_ns{ns}.csv.gz')
+    write_csv(tbl_update,file.path(path,'to_python',fn_out))
     
   }
 }

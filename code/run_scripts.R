@@ -1,4 +1,4 @@
-library(tidyverse)
+pacman::p_load(tidyverse)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'

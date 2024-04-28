@@ -1,4 +1,4 @@
-library(tidyverse)
+pacman::p_load(tidyverse)
 
 # script to merge icd and master table to obtain final ids for filtering
 # based on date overlap according to the following rules:

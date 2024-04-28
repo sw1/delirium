@@ -1,7 +1,4 @@
-library(text2vec)
-library(stopwords)
-library(tidyverse)
-library(doParallel)
+pacman::p_load(text2vec,stopwords,tidyverse,doParallel)
 
 # script to fit glove
 
