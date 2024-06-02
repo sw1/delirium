@@ -3,8 +3,8 @@ pacman::p_load(tidyverse,glue,Rtsne)
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
 }
-if (Sys.info()['login'] == 'sw424'){
-  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'swolosz1'){
+  path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
 }
 source(file.path(path,'code','fxns.R'))
 
