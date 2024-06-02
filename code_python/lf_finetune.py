@@ -82,9 +82,7 @@ if len(sys.argv) == 6 and sys.argv[2] in ['1','2','3']:
     s1 = int(sys.argv[3]) # seed dujring class balancing
     s2 = int(sys.argv[4]) # seed during training
     train_on_expert = int(sys.argv[5]) # whether to use remaining expert labels in training
-    folder_prefix = 'pl%s' % pl
-    folder_suffix = '_wdec%s_labsm%s_doh%s_doc%s_sa%s_sb%s_toe%s' % (w_decay,lab_smooth,do_hidden,do_class,s1,s2,train_on_expert)
-    folder_fn = re.sub(r".*?chunked_?",folder_prefix,tbl_fn).replace('.csv.gz',folder_suffix)
+    folder_fn = 'fit' + tbl_fn.replace('tbl_to_python_expertupdate','').replace('.csv.gz','')
     
     if 'rfst' in tbl_fn:
         st = True
@@ -100,7 +98,7 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 print('\n\nNumber of devices: %s.\n \
     Device set to %s.\n' % (torch.cuda.device_count(),device))
 
-print('\nModel output folder name:\n%s' % folder_fn)    
+print('\nModel output folder name:\n%s\n' % folder_fn)    
 
 # cpu processess for processing data and tokenizing
 cores = 16
@@ -111,8 +109,8 @@ params['s1'] = s1
 params['s2'] = s2
 params['do_hidden'] = do_hidden
 params['do_class'] = do_class
-params['n_train_epochs'] = 3 
-params['lr'] = 7.53e-07
+params['n_train_epochs'] = 3 #15 #3 
+params['lr'] = 5e-07 #2e-06 #5e-06 #7.53e-07
 params['w_decay'] = w_decay
 params['lab_smooth'] = lab_smooth
 
@@ -138,13 +136,14 @@ dat = read_data(os.path.join(data_dir,tbl_fn),train_on_expert=train_on_expert,st
 
 # split sets
 d_train = Dataset.from_dict(dat['train'])
-#d_train = d_train.train_test_split(test_size=0.95,shuffle=True,seed=s1)['train'] #subset data  ################## change back
+
+#d_train = d_train.train_test_split(test_size=0.95,shuffle=True,seed=s1)['train'] #subset data for testing
 
 d_val = Dataset.from_dict(dat['val'])
-d_test_expert = Dataset.from_dict(dat['test_expert'])
+#d_test_expert = Dataset.from_dict(dat['test_expert'])
 d_test_icd = Dataset.from_dict(dat['test_icd'])
 d_heldout = Dataset.from_dict(dat['heldout_expert'])
-                           
+
 # set up for designated pipeline                                      
 if pl == 1: # finetune with repo model
     mod = 'yikuan8/Clinical-Longformer' # repo clinical lf
@@ -180,7 +179,7 @@ elif pl == 3: # finetune with pretrained model that used custom tokenizer
     print('Resizing model embedding layer from %s to %s.' % (dim1,dim2))
     out_dir = out_token_pretrain_finetune
 
-print('\nModel output directory:\n%s' % out_dir) 
+print('\nModel output directory:\n%s\n' % out_dir) 
 
 # create dir if doesnt exist
 if os.path.exists(out_dir):
@@ -188,7 +187,7 @@ if os.path.exists(out_dir):
 os.makedirs(out_dir)
 
 # dump params to have record
-with open(os.path.join(out_dir,'params.dat'), "w") as f:
+with open(os.path.join(out_dir,'params.dat'),'w') as f:
     for key, value in params.items():
         print(f"{key}: {value}", file=f)
 
@@ -199,7 +198,7 @@ tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 def tokenize_dataset(data):
     
     data['text'] = [
-        line for line in data["text"] if len(line) > 0 and not line.isspace()
+        line for line in data['text'] if len(line) > 0 and not line.isspace()
     ]
         
     return tokenizer(
@@ -215,47 +214,14 @@ d_train = d_train.map(tokenize_dataset,batched=True,num_proc=cores)
 print('Tokenizing validation data.')
 d_val = d_val.map(tokenize_dataset,batched=True,num_proc=cores)
 print('Tokenizing testing data.')
-d_test_expert = d_test_expert.map(tokenize_dataset,batched=True,num_proc=cores)
 d_test_icd = d_test_icd.map(tokenize_dataset,batched=True,num_proc=cores)
 d_heldout = d_heldout.map(tokenize_dataset,batched=True,num_proc=cores)
 
 # balance minorty class via upsampling with replacement
-print('Balancing training data.')
-positive_label = d_train.filter(lambda example: example['labels']==1, num_proc=cores) 
-negative_label = d_train.filter(lambda example: example['labels']==0, num_proc=cores)
+print('Balancing training and validation data.')
+d_train = balance_data(d_train,s=params['s1'],cores=cores)
+d_val = balance_data(d_val,s=params['s1'],cores=cores)
 
-n_upsamp = len(negative_label) // len(positive_label)
-
-random.seed(params['s1'])
-seeds = random.sample(range(9999), n_upsamp)
-
-balanced_data = None
-for s in seeds:
-    if balanced_data:
-        balanced_data = concatenate_datasets([balanced_data, interleave_datasets([
-            positive_label.shuffle(seed=s), 
-            negative_label.shuffle(seed=s)
-        ])])
-    else:
-        balanced_data = interleave_datasets([positive_label, negative_label])
-d_train = balanced_data
-
-## s/p sweep
-#if pipeline == 1:
-    #params['n_train_epochs'] = 3
-    #params['lr'] = 8.4603e-07
-    #params['lab_smooth'] = 0.2070
-    #params['w_decay'] = 0.1133
-#if pipeline == 2:
-    #params['n_train_epochs'] = 2
-    #params['lr'] = 6.1845e-07
-    #params['lab_smooth'] = 0.0004
-    #params['w_decay'] = 0.0009
-#if pipeline == 3:
-    #params['n_train_epochs'] = 3
-    #params['lr'] = 7.9403e-07
-    #params['lab_smooth'] = 0.0003
-    #params['w_decay'] = 0.0127
 
 conf.hidden_dropout_prob=params['do_hidden']
 conf.classifier_dropout=params['do_class']
@@ -276,7 +242,7 @@ training_args = TrainingArguments(seed=params['s2'],
                                   save_steps=5000,
                                   
                                   evaluation_strategy='steps',
-                                  #max_steps=50,
+                                  #max_steps=50, # stopper for testing
                                   eval_steps=250,
                                   warmup_steps=500,
                                   
@@ -293,7 +259,7 @@ training_args = TrainingArguments(seed=params['s2'],
                                   
                                   fp16=True,
                                   auto_find_batch_size=True,
-                                  dataloader_num_workers=16, 
+                                  dataloader_num_workers=cores, 
                                   gradient_accumulation_steps=8,
                                   eval_accumulation_steps=8,
                                   gradient_checkpointing=False,
@@ -334,9 +300,6 @@ print([d_train['labels'].count(0),d_train['labels'].count(1)])
 
 print('Validation groups.')
 print([d_val['labels'].count(0),d_val['labels'].count(1)])
-
-print('Testing expert groups.')
-print([d_test_expert['labels'].count(0),d_test_expert['labels'].count(1)])
 
 print('Testing icd groups.')
 print([d_test_icd['labels'].count(0),d_test_icd['labels'].count(1)])
@@ -412,17 +375,14 @@ test_results = {}
 
 print('Testing icd labels.')
 y_test = trainer.predict(d_test_icd)
-print(compute_eval_metrics(y_test,d_test_icd['id']))
-test_results['icdset_hpihc'] = y_test
-
-print('Testing expert labels.')
-y_test = trainer.predict(d_test_expert)
-print(compute_eval_metrics(y_test,d_test_expert['id']))
-test_results['haobolabels_hpihc'] = y_test
+print(compute_eval_metrics(y_test,d_test_icd['id'],method=1))
+print(compute_eval_metrics(y_test,d_test_icd['id'],method=2))
+test_results['icd'] = y_test
 
 print('Heldout labels.')
 y_test = trainer.predict(d_heldout)
-print(compute_eval_metrics(y_test,d_heldout['id']))
+print(compute_eval_metrics(y_test,d_heldout['id'],method=1))
+print(compute_eval_metrics(y_test,d_heldout['id'],method=2))
 test_results['heldout'] = y_test
 
 # save results

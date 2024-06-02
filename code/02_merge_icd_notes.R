@@ -1,5 +1,5 @@
-pacman::p_load((tidyverse,tmcleanr,tm,textstem,tidytext,
-                lubridate,text2vec,stopwords)
+pacman::p_load(tidyverse,tmcleanr,tm,textstem,tidytext,
+               lubridate,text2vec,stopwords)
 
 # read icd_table.rds containing all case ids and icd codes and merge
 # that file with expert labels from notes.csv.gz and
@@ -42,7 +42,7 @@ tbl <- read_csv(file.path(path,'data_in','notes.csv.gz')) %>%
   select(-label_conc) %>%
   distinct()
 
-dups <-  tbl %>% 
+dups <- tbl %>% 
   group_by(note) %>% 
   filter(n()>1) 
 

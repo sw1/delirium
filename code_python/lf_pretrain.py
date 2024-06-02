@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 
 import gzip
 import csv
@@ -44,6 +45,9 @@ from sklearn.model_selection import train_test_split
 # import custom functions
 from lf_functions import *
 
+torch.cuda.empty_cache()
+gc.collect()
+
 os.environ['WORLD_SIZE'] = '1'
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
@@ -77,7 +81,6 @@ data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
     
 tbl_fn = 'tbl_to_python_expertupdate_chunked.csv.gz'
-out_dir = os.path.join(out_dir,'punc')
     
 token_dir = os.path.join(out_dir,'token')
 pretrain_dir = os.path.join(out_dir,'pretrain')
@@ -103,16 +106,16 @@ d_train = DatasetDict({
 mod = 'yikuan8/Clinical-Longformer' # repo clinical longformer
 tokenizer = AutoTokenizer.from_pretrained(mod,fast=True)
 
-if pipeline == 1: # pretrain with repo model
+if pl == 1: # pretrain with repo model
     out_dir = out_pretrain
-if pipeline == 2: # pretrain with custom tokenizer
+if pl == 2: # pretrain with custom tokenizer
     # obtain new tokens not in repo tokenizer then add them to repo tokenizer
     tokenizer_update = AutoTokenizer.from_pretrained(token_dir,fast=True)
     new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
     tokenizer.add_tokens(new_tokens)
     print('Length of updated tokenizer: %s' % len(tokenizer))
     out_dir = out_token_pretrain
-    
+
 # silence warning that seemingly isnt important
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
@@ -127,7 +130,7 @@ else:
     conf = AutoConfig.from_pretrained(mod,gradient_checkpointing=False)
     model = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     
-if pipeline == 2:
+if pl == 2:
     print("Length of trained tokenizer: %s" % len(tokenizer))
     # resize model embeddings to accomidate new tokens
     dim1 = str(model.get_input_embeddings())

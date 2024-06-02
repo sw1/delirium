@@ -23,7 +23,7 @@ s1 <- 2 # feature fit
 s2 <- 23 # cv split seed
 n_folds <- 5 # cv folds for feature selection
 
-p_feats = c(0.99,0.975,0.95,0.9,0.85) # percentiles of feat imp to test
+p_feats <- c(0.99,0.975,0.95,0.9,0.85) # percentiles of feat imp to test
 
 dat <- read_rds(file.path(path,'data_in','07_rf_cv_params.rds'))
 

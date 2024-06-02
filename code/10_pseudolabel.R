@@ -58,7 +58,7 @@ master <- master %>%
   anti_join(heldout,by='id')
 
 # get node size pars to sweep
-ns_adapt <- c(TRUE,FALSE)
+ns_adapt <- FALSE #c(TRUE,FALSE)
 node_size <- params$min_node_perc[1]
 
 # create parameter sweep table
@@ -327,5 +327,5 @@ cat(glue('All iterations complete in ',
          '{round(difftime(t_total_end,t_total_start,units="mins"),2)} ',
          'minutes, saving results.\n\n'))
 
-write_rds(list(combs=combs,out=out,time=c(t_total_start,t_total_end)),,
+write_rds(list(combs=combs,out=out,time=c(t_total_start,t_total_end)),
           file.path(path,'data_tmp','10_labels_rfst_count_del_full.rds'))

@@ -11,17 +11,17 @@ if (Sys.info()['login'] == 'sw424'){
 source(file.path(path,'code','fxns.R'))
 
 # create the following
-# 1 an unlabeled training set for pretraining/lasso
-# 2 an unlabeled validation set for pretraining/lasso
-# 3 a labeled test set using icd labels for testing
-# 4 a labeled test set using expert labels for self training
-# 5 a heldout set from the expert labels for final testing
+# 1 an unlabeled training set for pretraining
+# 2 an unlabeled validation set for pretraining
+# 3 a heldout set from the expert labels for final testing
+# 4 a labeled test set using icd labels for testing, same size as heldout
 
-# filter hc <= 50 or concat hpi_hc <= 100 from full table
+# filter concat hpi_hc <= 100 from full table
 # 154267 samples
 tbl <- read_rds(file.path(path,'data_in','03_tbl_final_wperiods.rds')) %>%
   select(id,hpi=history_of_present_illness,hc=hospital_course,
-         label,label_icd,hpi_hc) 
+         label,label_icd,hpi_hc) %>%
+  filter(nchar(hpi_hc) > 100) 
 
 cat(glue('\n\nNumber of total samples: {nrow(tbl)}\n\n'))
 
@@ -33,65 +33,70 @@ tbl_test_expert <- tbl %>%
 
 cat(glue('\n\nNumber of expert labeled samples: {nrow(tbl_test_expert)}\n\n'))
 
-# pull 300 samples from expert set for heldout
-set.seed(1234)
+# remove expert labels full table
+# 148377 remaining samples
+tbl <- tbl %>%
+  anti_join(tbl_test_expert,by='id') 
+
+cat(glue('\n\nNumber of samples after removing expert and heldout: ',
+         '{nrow(tbl)}\n\n'))
+
+# pull 10% of samples from expert set for heldout (n=589)
+set.seed(241)
 tbl_heldout_expert <- tbl_test_expert %>%
   group_by(label) %>%
-  sample_n(150,replace=FALSE) %>%
+  sample_frac(0.1,replace=FALSE) %>%
   ungroup() %>%
   mutate(set='heldout_expert')
 
 cat(glue('\n\nNumber of heldout samples: {nrow(tbl_heldout_expert)}\n\n'))
 
 # remove heldout set from expert set
-# 4857 remaining samples
+# 5301 remaining expert labeled samples
 tbl_test_expert <- tbl_test_expert %>%
   anti_join(tbl_heldout_expert,by='id')
 
 cat(glue('\n\nNumber of expert labeled samples after heldout: ',
          '{nrow(tbl_test_expert)}\n\n'))
 
-# remove expert labeled and heldout samples from full table
-# 148377 remaining samples
-tbl <- tbl %>%
-  anti_join(tbl_test_expert,by='id') %>%
-  anti_join(tbl_heldout_expert,by='id')
+# create icd testing set from full table, same size as heldout.
+# 589 icd labeled samples    
+ids_test_0 <- tbl %>%
+  filter(label_icd == 0) %>%
+  sample_n(sum(tbl_heldout_expert$label == 0),replace=FALSE) %>%
+  pull(id) 
+ids_test_1 <- tbl %>%
+  filter(label_icd == 1) %>%
+  sample_n(sum(tbl_heldout_expert$label == 1),replace=FALSE) %>%
+  pull(id) 
 
-cat(glue('\n\nNumber of samples after removing expert and heldout: ',
-         '{nrow(tbl)}\n\n'))
-
-# create testing set from full table. Will be double 10% of the 
-# minority class.
-# 1648 icd labeled samples    
-n <- ceiling(min(table(tbl$label_icd) * 0.1))
 tbl_test_icd <- tbl %>%
-  filter(label_icd %in% c(0,1)) %>%
-  group_by(label_icd) %>%
-  sample_n(n,replace=FALSE) %>%
+  filter(id %in% c(ids_test_0,ids_test_1)) %>%
   mutate(set='test_icd')
 
 cat(glue('\n\nNumber of icd labeled samples: {nrow(tbl_test_icd)}\n\n'))
 
 # remove icd labeled samples from full table
-# 146729 remaining samp[les
+# 147788 remaining samples
 tbl <- tbl %>%
   anti_join(tbl_test_icd,by='id') 
 
 cat(glue('\n\nNumber of samples after removing icd labeled: ',
          '{nrow(tbl)}\n\n'))
 
-# create validation set from full table. Will be 10% of full table
-# 1648 validation samples
+# create validation set from full table. Will be 1% of remaining data.
+# This is strictly for pretraining validation and hence can small.
+# 740 validation samples
 tbl_val <- tbl %>%
-  filter(label_icd %in% c(0,1)) %>%
   group_by(label_icd) %>%
-  sample_n(n,replace=FALSE) %>%
+  sample_frac(0.01,replace=FALSE) %>%
+  ungroup() %>%
   mutate(set='val')
 
 cat(glue('\n\nNumber of validation samples: {nrow(tbl_val)}\n\n'))
 
 # remove validation samples from full table yielding training set
-# 145081 training samples
+# 140399 training samples
 tbl <- tbl %>%
   anti_join(tbl_val,by='id') %>%
   mutate(set='train')

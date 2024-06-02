@@ -53,6 +53,110 @@ write_csv(tbl,
                     'to_python',
                     'tbl_to_python_expertupdate_chunked.csv.gz'))
 
+# creating a table with only expert labels for extra longformer eval
+tbl_onlyexpert <- tbl %>%
+  filter(label != -1) %>%
+  mutate(set=if_else(set == 'heldout_expert','heldout_expert','train'))
+
+# create balanced val set from expert labeled training set, 10%
+n_val <- tbl_onlyexpert %>% 
+  select(id,label) %>% 
+  distinct() %>%
+  select(label) %>%
+  group_by(label) %>%
+  reframe(n=n()) %>%
+  filter(n == min(n)) %>%
+  mutate(n=floor(n*0.05)) %>%
+  pull(n)
+      
+tbl_onlyexpert_val <- tbl_onlyexpert %>%
+  filter(set == 'train') %>%
+  select(id,label) %>%
+  distinct() %>%
+  group_by(label) %>%
+  sample_n(n_val) %>%
+  pull(id)
+
+tbl_onlyexpert <- tbl_onlyexpert %>%
+  mutate(set=if_else(id %in% tbl_onlyexpert_val,'val',set))
+
+# adding back the icd test set and also the expert test set which will also
+# be in the training set. Only adding the expert test set so the longformer
+# script wont have to be edited further. Gave samples unique ids starting
+# with 9990000 to avoid any overlap with original ids.
+tbl_onlyexpert <- tbl_onlyexpert %>%
+  bind_rows(tbl %>% filter(set == 'test_icd')) %>%
+  bind_rows(tbl %>% 
+              filter(set == 'test_expert') %>%
+              mutate(id = row_number() + 9990000)) 
+
+write_csv(tbl_onlyexpert,
+          file.path(path,
+                    'to_python',
+                    'tbl_to_python_expertupdate_onlyexpert_chunked.csv.gz'))
+
+write_csv(tbl_onlyexpert %>%
+            mutate(hpi_hc=glue('{hpi} {hc}')) %>%
+            distinct(),
+          file.path(path,
+                    'to_python',
+                    'tbl_to_python_expertupdate_onlyexpert.csv.gz'))
+
+# creating last table with expert labels 1 and all NAs 0. Labels will be
+# set as label_icds so longerformer script can be used without modification.
+# Because labels change, will reset val set so its balanced.
+tbl_fullexpert <- tbl %>%
+  select(-label) %>%
+  left_join(read_csv(file.path(path,'data_in','notes.csv.gz')) %>%
+              select(id=rdr_id,label=postop_delirium_yn) %>%
+              distinct(),by='id') %>%
+  mutate(label_icd=label,
+         set=if_else(set != 'heldout_expert','train',set))
+
+n_val <- tbl_fullexpert %>% 
+  filter(set == 'train') %>%
+  select(id,label) %>% 
+  distinct() %>%
+  select(label) %>%
+  group_by(label) %>%
+  reframe(n=n()) %>%
+  filter(n == min(n)) %>%
+  mutate(n=floor(n*0.05)) %>%
+  pull(n)
+
+tbl_fullexpert_val <- tbl_fullexpert %>%
+  filter(set == 'train') %>%
+  select(id,label) %>%
+  distinct() %>%
+  group_by(label) %>%
+  sample_n(n_val) %>%
+  pull(id)
+
+tbl_fullexpert <- tbl_fullexpert %>%
+  mutate(set=if_else(id %in% tbl_fullexpert_val,'val',set))
+
+# reinstering test_expert with unique ids just so longerformer script
+# runs without modification. will be duplicated ids/examples.
+tbl_fullexpert <- tbl_fullexpert %>%
+  bind_rows(tbl %>% 
+              filter(set == 'test_icd') %>%
+              mutate(id = row_number() + 8880000)) %>%
+  bind_rows(tbl %>% 
+              filter(set == 'test_expert') %>%
+              mutate(id = row_number() + 9990000)) 
+
+write_csv(tbl_fullexpert,
+          file.path(path,
+                    'to_python',
+                    'tbl_to_python_expertupdate_fullexpert_chunked.csv.gz'))
+
+write_csv(tbl_fullexpert %>%
+            mutate(hpi_hc=glue('{hpi} {hc}')) %>%
+            distinct(),
+          file.path(path,
+                    'to_python',
+                    'tbl_to_python_expertupdate_fullexpert.csv.gz'))
+
 # get filenames for pseudolabels
 fns <- list.files(file.path(path,'data_in'),
                   pattern='^labels_rfst',full.names=TRUE)
@@ -60,6 +164,9 @@ fns <- list.files(file.path(path,'data_in'),
 maj_vote <- list()
 
 for (fn in fns){
+  
+  fn_short <- str_extract(fn,'(labels_rfst.*.csv.gz)',group=1)
+  cat(glue('\n\n\n Updating labels for {fn_short}. \n\n\n'))
   
   # get parameters from filenames
   params <- str_replace(fn,'^.*\\/','')
@@ -101,8 +208,11 @@ for (fn in fns){
 
 # get majority vote for each threshold and feature set
 for (th in names(maj_vote)){
+  
   for (ns in names(maj_vote[[th]])){
   
+    cat(glue('\n\n\n Performing majority vote for th={th}, ns={ns}. \n\n\n'))
+
     # skip if only one seed
     if (ncol(maj_vote[[th]][[ns]]) < 3) next
     

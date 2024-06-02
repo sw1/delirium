@@ -1,4 +1,4 @@
-pacman::p_load(tidyverse)
+pacman::p_load(tidyverse,glue)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -7,13 +7,14 @@ if (Sys.info()['login'] == 'sw424'){
   path <- 'C:\\Users\\sw424\\Dropbox'
 }
 
-ns <- 5:9
-fns <- list.files(file.path(path,'code'))
-idx <- unlist(sapply(sprintf('^%s_',ns), function(x) which(str_detect(fns,x))))
-fns <- fns[idx]
-paths <- file.path(path,'code',fns)
+fns <- tibble(fn=list.files(file.path(path,'code'))) %>%
+  mutate(idx=as.numeric(str_extract(fn,'(\\d+)_.*',group=1))) %>%
+  filter(!is.na(idx)) %>%
+  arrange(idx) %>%
+  filter(idx >= 0)
 
-for (p in paths){
-  cat(sprintf('\n\n\nRunning script %s.\n\n\n',p))
-  source(p)
+for (i in 1:nrow(fns)){
+  cat(glue('\n\n\nRunning script {fns$fn[i]}.\n\n\n'))
+  p <- file.path(path,'code',fns$fn[i])
+  source(p,local=TRUE,echo=FALSE)
 }

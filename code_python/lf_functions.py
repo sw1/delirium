@@ -82,7 +82,6 @@ def read_data(fn,st,train_on_expert=True,finetuning=True):
         except ValueError:
             idn = int(float(row[idx_id]))
 
-        idn = row[idx_id]
         setn = row[idx_set]        
         text = row[idx_text]
         
@@ -94,7 +93,7 @@ def read_data(fn,st,train_on_expert=True,finetuning=True):
         elif setn == 'test_icd':
             label = int(row[idx_label_icd])
         elif setn == 'train_expert':
-            label = int(row[idx_label_icd])
+            label = int(row[idx_label])
             if train_on_expert:
                 setn = 'train'                
         else:
@@ -105,6 +104,14 @@ def read_data(fn,st,train_on_expert=True,finetuning=True):
                 d[setn]['text'].append(text) 
                 d[setn]['id'].append(idn)
                 d[setn]['labels'].append(label)
+                
+                # add heldout samples to icd test set w/ icd labels
+                if setn == 'heldout_expert':
+                    label_icd = int(row[idx_label_icd])
+                    if label_icd != -1:                    
+                        d['test_icd']['text'].append(text) 
+                        d['test_icd']['id'].append(idn)
+                        d['test_icd']['labels'].append(label_icd)
         else:
             if setn == 'train' or setn == 'val':
                 d[setn]['labels'].append(label)
@@ -143,8 +150,7 @@ def group_preds(predictions,labels):
             
     return(res_dict)
 
-
-def majority_vote(res_dict):
+def majority_vote(res_dict,method):
     
     maj_dict = dict()
 
@@ -156,10 +162,25 @@ def majority_vote(res_dict):
             decision = res_dict[k]['pred'][0]
             
         else:
-            
+        
             n_str = len(res_dict[k]['pred'])
-            decision_mag = [abs(inv_logit(v))-.5 for v in res_dict[k]['val']]
-            decision = res_dict[k]['pred'][np.argmax(decision_mag)]
+            
+            if method == 1:
+        
+                decision_mag = [abs(inv_logit(v))-.5 for v in res_dict[k]['val']]
+                decision = res_dict[k]['pred'][np.argmax(decision_mag)]
+                
+            elif method == 2:
+                
+                p = inv_logit(np.mean(res_dict[k]['val']))
+                
+                if p >= 0.5:
+                    decision = 1
+                else:
+                    decision = 0
+            else:
+                print("Method must be 1 for majority vote or 2 for average.")
+                return  
            
         if decision == res_dict[k]['label']:
             m = 1
@@ -170,10 +191,10 @@ def majority_vote(res_dict):
 
     return(maj_dict)
 
-def compute_eval_metrics(res,test_ids):
+def compute_eval_metrics(res,test_ids,method=1):
     
     grouped = group_preds(res,test_ids)
-    mv = majority_vote(grouped)
+    mv = majority_vote(grouped,method)
     
     preds = [v[1] for k,v in mv.items()]
     labels = [v[2] for k,v in mv.items()]
@@ -185,3 +206,37 @@ def compute_eval_metrics(res,test_ids):
     
     return {'accuracy': acc, 'f1': f1, 'precision': prec, 'recall': rec, 
         'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
+
+def n_upsamp(positive_label,negative_label):
+    len_pos = len(positive_label)
+    len_neg = len(negative_label)
+    
+    if (len_pos > len_neg):
+        n_upsamp = len(positive_label) // len(negative_label)
+    elif(len_neg > len_pos):
+        n_upsamp = len(negative_label) // len(positive_label)
+    else:
+        n_upsamp = 0
+        
+    return(n_upsamp)
+
+def balance_data(x,s=123,cores=1):
+    positive_label = x.filter(lambda example: example['labels']==1, num_proc=cores) 
+    negative_label = x.filter(lambda example: example['labels']==0, num_proc=cores)
+
+    n_us = n_upsamp(positive_label,negative_label)
+
+    random.seed(s)
+    seeds = random.sample(range(9999), n_us)
+
+    balanced_data = None
+    for ss in seeds:
+        if balanced_data:
+            balanced_data = concatenate_datasets([balanced_data, interleave_datasets([
+                positive_label.shuffle(seed=ss), 
+                negative_label.shuffle(seed=ss)
+            ])])
+        else:
+            balanced_data = interleave_datasets([positive_label, negative_label])
+
+    return(balanced_data)
