@@ -63,13 +63,7 @@ conf <- confusionMatrix(table(y,yhat),
 
 conf
 
-master2 <- read_rds(file.path(path,'data_in','06_dat_rf_cv_fs.rds')) 
-
-y <- master2 %>% 
-  filter(set == 'heldout_expert') %>% 
-  pull(label)
-
-yhat <- predict(fit, master2 %>%
+yhat <- predict(fit, master %>%
                   filter(set == 'heldout_expert') %>%
                   select(label,matches(feat_subset)))$predictions
 

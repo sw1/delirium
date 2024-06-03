@@ -10,6 +10,8 @@
 __pycache__
 */__pycache__/*
 code/__pycache__/
+code_tmp/*
+code_tmp/
 data_in/*
 data_in/
 data_out/*
