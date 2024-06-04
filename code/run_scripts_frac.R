@@ -6,14 +6,22 @@ pacman::p_load(tidyverse,glue)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
+  all_cores <- 4
+  scripts_fn <- 'code_tmp2'
+  out_fn <- 'data_tmp2'
+  fracs <- rev(c(0.75,0.5,0.35,0.2))
 }
 if (Sys.info()['login'] == 'swolosz1'){
   path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
+  all_cores <- 16
+  scripts_fn <- 'code_tmp1'
+  out_fn <- 'data_tmp1'
+  fracs <- c(0.75,0.5,0.35,0.2)
 }
 source(file.path(path,'code','fxns.R'))
 
-s1 <- 43
-fracs <- c(0.75,0.5,0.35,0.2)
+set.seed(43)
+seeds <- sample(1:9999,length(fracs))
 
 # filter scripts that involve self training and hence have to be adjusted
 fns <- tibble(fn=list.files(file.path(path,'code'))) %>%
@@ -23,17 +31,17 @@ fns <- tibble(fn=list.files(file.path(path,'code'))) %>%
   filter(idx >= 7 & idx <= 10) 
 
 # create tmp dirs to copy edited scripts and intermediate files
-scripts_dir <- file.path(path,'code_tmp')
-out_dir <- file.path(path,'data_tmp','subsamp')
+scripts_dir <- file.path(path,scripts_fn)
+out_dir <- file.path(path,out_fn)
 
-if (file.exists(scripts_dir)){
-  file.remove(list.files(scripts_dir,recursive=TRUE,full.names=TRUE))
-}
+if (dir.exists(scripts_dir)) unlink(scripts_dir,recursive=TRUE)
+if (dir.exists(out_dir)) unlink(out_dir,recursive=TRUE)
 
 dir.create(file.path(out_dir,'data_in'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'data_out'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'data_tmp'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'code'),recursive=TRUE,showWarnings=FALSE)
+dir.create(scripts_dir,recursive=TRUE,showWarnings=FALSE)
 
 file.copy(file.path(path,'code',fns$fn),scripts_dir)
 
@@ -50,7 +58,9 @@ test <- master %>%
 heldout <- master %>%
   anti_join(test,by='id')
 
-for (f in fracs){
+for (i in seq_along(fracs)){
+  
+  f <- fracs[i]
   
   if (file.exists(out_dir)){
     file.remove(list.files(out_dir,recursive=TRUE,full.names=TRUE))
@@ -62,7 +72,7 @@ for (f in fracs){
             file.path(out_dir,'data_in'))
   
   # subset expert labels by f
-  set.seed(s1)
+  set.seed(seeds[i])
   test_frac <- test %>%
     sample_frac(f)
   
@@ -82,8 +92,9 @@ for (f in fracs){
   
   # edit scripts to change path to tmp folder and for file 10 only do
   # thresholding for 0.7 given results
-  for (i in sort(fns$idx)){
-    fn <- fns %>% filter(idx==i) %>% pull(fn)
+  for (ii in sort(fns$idx)){
+    
+    fn <- fns %>% filter(idx==ii) %>% pull(fn)
     
     cat(glue('\n\nRunning script {fn}.\n\n'))
     read_lines(fn) %>%
@@ -95,6 +106,18 @@ for (f in fracs){
         pattern='0.6,0.7,0.8,0.9',
         replace='0.7'
         ) %>%
+      str_replace(
+        pattern='all_cores <- \\d+',
+        replace=glue('all_cores <- {all_cores}')
+      ) %>%
+      str_replace(
+        pattern='dopar',
+        replace='do'
+      ) %>%
+      str_replace(
+        pattern='num.threads=1',
+        replace=glue('num.threads={all_cores}')
+      ) %>%
       writeLines(con=fn)
     source(fn,local=TRUE,echo=FALSE)
     
@@ -225,6 +248,8 @@ for (f in fracs){
       
     }
   }
-  
 }
+
+#if (dir.exists(scripts_dir)) unlink(scripts_dir,recursive=TRUE)
+#if (dir.exists(out_dir)) unlink(out_dir,recursive=TRUE)
 

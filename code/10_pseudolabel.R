@@ -8,10 +8,7 @@ if (Sys.info()['login'] == 'sw1'){
 }
 if (Sys.info()['login'] == 'swolosz1'){
   path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
-<<<<<<< HEAD
   all_cores <- 8
-=======
->>>>>>> 67e45b50c18088b99e1954a4b30d6b48e46b1fc5
 }
 source(file.path(path,'code','fxns.R'))
 
@@ -223,7 +220,7 @@ out <- foreach(i=1:nrow(combs),.combine='c',.verbose=TRUE,
       ) %>%
         set_engine('ranger',
                    replace=TRUE,
-                   num.threads=1, # testing
+                   num.threads=1, 
                    verbose=FALSE,
                    oob.error=FALSE) %>%
         set_mode('classification')
