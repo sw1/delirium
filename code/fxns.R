@@ -453,12 +453,3 @@ get_node_size <- function(param,x){
   return(unname(ns))
   
 }
-
-edit_run_script_frac <- function(fn){
-  read_lines(fn) %>%
-    str_replace(
-      pattern='embeddings\\\\\\\\delirium',
-      replace='embeddings\\\\\\\\delirium\\\\\\\\code_tmp') %>% 
-    writeLines(con=fn)
-  source(fn,local=TRUE,echo=FALSE)
-}

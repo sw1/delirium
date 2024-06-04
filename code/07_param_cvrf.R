@@ -4,16 +4,18 @@ pacman::p_load(tidymodels,tidyverse,doParallel,vip,icd.data,ranger,glue)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
+  all_cores <- 4
 }
-if (Sys.info()['login'] == 'sw424'){
-  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'swolosz1'){
+  path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
+  all_cores <- 8
 }
 source(file.path(path,'code','fxns.R'))
 
 outfile <- file.path(path,'..\\paramcv_out.txt')
 file.remove(outfile)
 
-all_cores <- parallel::detectCores(logical=TRUE)
+#all_cores <- parallel::detectCores(logical=TRUE)
 cl <- makePSOCKcluster(all_cores,outfile=outfile)
 registerDoParallel(cl)
 

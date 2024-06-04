@@ -4,21 +4,23 @@ pacman::p_load(tidymodels,tidyverse,doParallel,ranger,glue)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
+  all_cores <- 4
 }
-if (Sys.info()['login'] == 'sw424'){
-  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'swolosz1'){
+  path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
+  all_cores <- 8
 }
 source(file.path(path,'code','fxns.R'))
 
 outfile <- file.path(path,'..\\semisup_out.txt')
-file.remove(outfile)
+if (file.exists(outfile)) file.remove(outfile)
 
-all_cores <- parallel::detectCores(logical=FALSE)
+#all_cores <- parallel::detectCores(logical=FALSE)
 cl <- makePSOCKcluster(all_cores,outfile=outfile)
 registerDoParallel(cl)
 
 testing <- FALSE
-thresholds <- c(0.7,0.8,0.9) # thresholds for pseudo label
+thresholds <- c(0.6,0.7,0.8,0.9) # thresholds for pseudo label
 seeds <- c(1834,4532,8010) # random seeds
 tol <- 50 # tolerance for stopping early
 tol_stop <- 5 # number of times to hit tolerance before stopping
