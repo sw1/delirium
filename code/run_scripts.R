@@ -16,5 +16,6 @@ fns <- tibble(fn=list.files(file.path(path,'code'))) %>%
 for (i in 1:nrow(fns)){
   cat(glue('\n\n\nRunning script {fns$fn[i]}.\n\n\n'))
   p <- file.path(path,'code',fns$fn[i])
-  source(p,local=TRUE,echo=FALSE)
+  env_tmp <- new.env()
+  source(p,local=env_tmp,echo=FALSE)
 }

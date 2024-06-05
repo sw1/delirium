@@ -5,6 +5,7 @@
 *.Rhistory
 *.RData
 *.Ruserdata
+*.txt
 
 #folders
 __pycache__

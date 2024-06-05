@@ -4,19 +4,20 @@ pacman::p_load(tidyverse,glue)
 # generated. this allows to subset expert labeled data to eval the amount
 # of data needed before a substantial performance drop.
 
+fracs <- c(0.5,0.35) #c(0.75,0.5,0.35,0.2)
+
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
-  all_cores <- 4
+  all_cores <- 8
   scripts_fn <- 'code_tmp2'
   out_fn <- 'data_tmp2'
-  fracs <- rev(c(0.75,0.5,0.35,0.2))
+  fracs <- rev(fracs)
 }
 if (Sys.info()['login'] == 'swolosz1'){
   path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
   all_cores <- 16
   scripts_fn <- 'code_tmp1'
   out_fn <- 'data_tmp1'
-  fracs <- c(0.75,0.5,0.35,0.2)
 }
 source(file.path(path,'code','fxns.R'))
 
@@ -24,7 +25,7 @@ set.seed(43)
 seeds <- sample(1:9999,length(fracs))
 
 # filter scripts that involve self training and hence have to be adjusted
-fns <- tibble(fn=list.files(file.path(path,'code'))) %>%
+fns_raw <- tibble(fn=list.files(file.path(path,'code'))) %>%
   mutate(idx=as.numeric(str_extract(fn,'(\\d+)_.*',group=1))) %>%
   filter(!is.na(idx)) %>%
   arrange(idx) %>%
@@ -43,11 +44,6 @@ dir.create(file.path(out_dir,'data_tmp'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'code'),recursive=TRUE,showWarnings=FALSE)
 dir.create(scripts_dir,recursive=TRUE,showWarnings=FALSE)
 
-file.copy(file.path(path,'code',fns$fn),scripts_dir)
-
-fns <- fns %>%
-  mutate(fn=file.path(scripts_dir,fn))
-
 # load data file thats used that contains expert labels and can be reused
 # throughout loop for subsetting by f
 master <- read_rds(file.path(path,'data_in','06_dat_rf_cv_fs.rds'))
@@ -62,9 +58,13 @@ for (i in seq_along(fracs)){
   
   f <- fracs[i]
   
-  if (file.exists(out_dir)){
-    file.remove(list.files(out_dir,recursive=TRUE,full.names=TRUE))
-  }
+  file.remove(list.files(out_dir,recursive=TRUE,full.names=TRUE))
+  file.remove(list.files(scripts_dir,recursive=TRUE,full.names=TRUE))
+  
+  file.copy(file.path(path,'code',fns_raw$fn),scripts_dir)
+  
+  fns <- fns_raw %>%
+    mutate(fn=file.path(scripts_dir,fn))
   
   file.copy(file.path(path,'code','fxns.R'),
             file.path(out_dir,'code'))
@@ -100,7 +100,9 @@ for (i in seq_along(fracs)){
     read_lines(fn) %>%
       str_replace(
         pattern='embeddings\\\\\\\\delirium',
-        replace='embeddings\\\\\\\\delirium\\\\\\\\data_tmp\\\\\\\\subsamp'
+        replace=glue('embeddings\\\\\\\\',
+                     'delirium\\\\\\\\',
+                     '{out_fn}\\\\\\\\')
         ) %>% 
       str_replace(
         pattern='0.6,0.7,0.8,0.9',
@@ -119,7 +121,9 @@ for (i in seq_along(fracs)){
         replace=glue('num.threads={all_cores}')
       ) %>%
       writeLines(con=fn)
-    source(fn,local=TRUE,echo=FALSE)
+    
+    env_tmp <- new.env()
+    source(fn,local=env_tmp,echo=FALSE)
     
   }
   
@@ -195,7 +199,7 @@ for (i in seq_along(fracs)){
     
     fn_out <- glue('tbl_to_python_expertupdate_chunked_rfst_',
                    "th{params['th']}_ns{params['ns']}_",
-                   "seed{params['seed']}_frac{f}.csv.gz")
+                   "seed{params['seed']}_frac{f*100}.csv.gz")
     write_csv(tbl_update,file.path(path,'to_python',fn_out))
     
     # try to append labels for seed s to df with df of labels from other seeds
@@ -243,13 +247,13 @@ for (i in seq_along(fracs)){
         bind_cols(vote)
       
       fn_out <- glue('tbl_to_python_expertupdate_chunked_rfst_majvote_',
-                     'th{th}_ns{ns}_frac{f}.csv.gz')
+                     'th{th}_ns{ns}_frac{f*100}.csv.gz')
       write_csv(tbl_update,file.path(path,'to_python',fn_out))
       
     }
   }
 }
 
-#if (dir.exists(scripts_dir)) unlink(scripts_dir,recursive=TRUE)
-#if (dir.exists(out_dir)) unlink(out_dir,recursive=TRUE)
+if (dir.exists(scripts_dir)) unlink(scripts_dir,recursive=TRUE)
+if (dir.exists(out_dir)) unlink(out_dir,recursive=TRUE)
 
