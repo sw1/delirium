@@ -21,6 +21,8 @@ to_python/*
 to_python/
 res/*
 res/
+scratch/*
+scratch/
 sync/*
 sync/
 sync/sync_script.sh

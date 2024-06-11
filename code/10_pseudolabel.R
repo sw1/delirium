@@ -12,7 +12,7 @@ if (Sys.info()['login'] == 'swolosz1'){
 }
 source(file.path(path,'code','fxns.R'))
 
-outfile <- file.path(path,'..\\semisup_out.txt')
+outfile <- file.path(path,'scratch','semisup_out.txt')
 if (file.exists(outfile)) file.remove(outfile)
 
 #all_cores <- parallel::detectCores(logical=FALSE)

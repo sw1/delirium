@@ -14,7 +14,7 @@ if (Sys.info()['login'] == 'swolosz1'){
 }
 source(file.path(path,'code','fxns.R'))
 
-outfile <- file.path(path,'..\\featsel_out.txt')
+outfile <- file.path(path,'scratch','featsel_out.txt')
 file.remove(outfile)
 
 #all_cores <- parallel::detectCores(logical=TRUE)

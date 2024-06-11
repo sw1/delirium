@@ -4,7 +4,7 @@ pacman::p_load(tidyverse,glue)
 # generated. this allows to subset expert labeled data to eval the amount
 # of data needed before a substantial performance drop.
 
-fracs <- c(0.5,0.35) #c(0.75,0.5,0.35,0.2)
+fracs <- c(0.75,0.5,0.35,0.2)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -44,6 +44,12 @@ dir.create(file.path(out_dir,'data_tmp'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'code'),recursive=TRUE,showWarnings=FALSE)
 dir.create(scripts_dir,recursive=TRUE,showWarnings=FALSE)
 
+tbl_baseline <- read_csv(
+  file.path(path,
+            'to_python',
+            'tbl_to_python_expertupdate_fullexpert_chunked.csv.gz')
+)
+
 # load data file thats used that contains expert labels and can be reused
 # throughout loop for subsetting by f
 master <- read_rds(file.path(path,'data_in','06_dat_rf_cv_fs.rds'))
@@ -80,13 +86,23 @@ for (i in seq_along(fracs)){
     anti_join(test_frac,by='id') %>%
     pull(id)
   
+  # filter expert labels from baseline chunked table for later comps
+  tbl_baseline %>%
+    filter(!(id %in% test_anti)) %>%
+    write_csv(
+      file.path(path,
+                'to_python',
+                glue('tbl_to_python_expertupdate_fullexpert_chunked',
+                     '_frac{f*100}',
+                     '.csv.gz')))
+  
   # filter expert labels for all data files that are used and make a copy
   # in tmp dir
   master_frac <- heldout %>%
     bind_rows(test_frac) %>%
     write_rds(file.path(out_dir,'data_in','06_dat_rf_cv_fs.rds'))
   
-  full_tbl <- read_rds(file.path(path,'data_in','05_full_icd_tbl.rds')) %>%
+  read_rds(file.path(path,'data_in','05_full_icd_tbl.rds')) %>%
     filter(!(id %in% test_anti)) %>%
     write_rds(file.path(out_dir,'data_in','05_full_icd_tbl.rds'))
   
@@ -256,4 +272,3 @@ for (i in seq_along(fracs)){
 
 if (dir.exists(scripts_dir)) unlink(scripts_dir,recursive=TRUE)
 if (dir.exists(out_dir)) unlink(out_dir,recursive=TRUE)
-
