@@ -5,13 +5,17 @@ pacman::p_load(tidyverse,glue)
 # of data needed before a substantial performance drop.
 
 fracs <- c(0.75,0.5,0.35,0.2)
+idx_fracs <- seq_along(fracs)
+
+set.seed(43)
+seeds <- sample(1:9999,length(fracs))
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
   all_cores <- 8
   scripts_fn <- 'code_tmp2'
   out_fn <- 'data_tmp2'
-  fracs <- rev(fracs)
+  idx_fracs <- rev(idx_fracs)
 }
 if (Sys.info()['login'] == 'swolosz1'){
   path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
@@ -20,9 +24,6 @@ if (Sys.info()['login'] == 'swolosz1'){
   out_fn <- 'data_tmp1'
 }
 source(file.path(path,'code','fxns.R'))
-
-set.seed(43)
-seeds <- sample(1:9999,length(fracs))
 
 # filter scripts that involve self training and hence have to be adjusted
 fns_raw <- tibble(fn=list.files(file.path(path,'code'))) %>%
@@ -38,6 +39,7 @@ out_dir <- file.path(path,out_fn)
 if (dir.exists(scripts_dir)) unlink(scripts_dir,recursive=TRUE)
 if (dir.exists(out_dir)) unlink(out_dir,recursive=TRUE)
 
+dir.create(file.path(out_dir,'scratch'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'data_in'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'data_out'),recursive=TRUE,showWarnings=FALSE)
 dir.create(file.path(out_dir,'data_tmp'),recursive=TRUE,showWarnings=FALSE)
@@ -60,7 +62,7 @@ test <- master %>%
 heldout <- master %>%
   anti_join(test,by='id')
 
-for (i in seq_along(fracs)){
+for (i in idx_fracs){
   
   f <- fracs[i]
   
@@ -135,6 +137,10 @@ for (i in seq_along(fracs)){
       str_replace(
         pattern='num.threads=1',
         replace=glue('num.threads={all_cores}')
+      ) %>%
+      str_replace(
+        pattern='sample_n\\(250\\)',
+        replace=glue('sample_n(round(250*{f}))')
       ) %>%
       writeLines(con=fn)
     
