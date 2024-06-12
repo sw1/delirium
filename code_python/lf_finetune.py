@@ -307,7 +307,7 @@ trainer = cTrainer(
     eval_dataset=d_val,
     tokenizer=tokenizer,
     compute_metrics=compute_metrics,
-    callbacks = [EarlyStoppingCallback(early_stopping_patience=3)],
+    callbacks = [EarlyStoppingCallback(early_stopping_patience=3,early_stopping_threshold=0.005)],
 )
 
 # make out dir if doesnt exist
