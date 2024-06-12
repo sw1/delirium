@@ -131,16 +131,19 @@ def logit(p):
 def inv_logit(p):
     return np.exp(p) / (1 + np.exp(p))
 
-def group_preds(predictions,labels):
+def softmax(x):
+    return np.exp(x) / np.sum(np.exp(x), axis=0)
+
+def group_preds(predictions,ids):
     
-    N = len(labels)
+    N = len(ids)
     res_dict = dict()
     
     for i in range(N):
-        idnum = labels[i]
+        idnum = ids[i]
         label = predictions[1][i]
-        pred = predictions[0][i].argmax()
-        val = predictions[0][i].max()
+        val = softmax(predictions[0][i])[-1]
+        pred = np.where(val > 0.5,1,0)
  
         try:
             res_dict[idnum]['pred'].append(pred)
@@ -156,25 +159,27 @@ def majority_vote(res_dict,method):
 
     for k,v in res_dict.items():
         
-        if len(res_dict[k]['pred']) == 1:
+        if len(v['pred']) == 1:
             
             n_str = 1
-            decision = res_dict[k]['pred'][0]
+            decision = v['pred'][0]
+            score = v['val'][0]
             
         else:
         
-            n_str = len(res_dict[k]['pred'])
+            n_str = len(v['pred'])
             
             if method == 1:
         
-                decision_mag = [abs(inv_logit(v))-.5 for v in res_dict[k]['val']]
-                decision = res_dict[k]['pred'][np.argmax(decision_mag)]
+                score_idx = abs(np.array(v['val'])-.5).argmax()
+                score = v['val'][score_idx]
+                decision = v['pred'][score_idx]
                 
             elif method == 2:
                 
-                p = inv_logit(np.mean(res_dict[k]['val']))
+                score = np.mean(v['val'])
                 
-                if p >= 0.5:
+                if score > 0.5:
                     decision = 1
                 else:
                     decision = 0
@@ -182,12 +187,12 @@ def majority_vote(res_dict,method):
                 print("Method must be 1 for majority vote or 2 for average.")
                 return  
            
-        if decision == res_dict[k]['label']:
+        if decision == v['label']:
             m = 1
         else:
             m = 0
                 
-        maj_dict[k] = [m,decision,res_dict[k]['label'],n_str]
+        maj_dict[k] = [m,decision,v['label'],n_str,score]
 
     return(maj_dict)
 
@@ -196,15 +201,21 @@ def compute_eval_metrics(res,test_ids,method=1):
     grouped = group_preds(res,test_ids)
     mv = majority_vote(grouped,method)
     
-    preds = [v[1] for k,v in mv.items()]
-    labels = [v[2] for k,v in mv.items()]
+    preds = list()
+    labels = list()
+    scores = list()
+    for k,v in mv.items():  
+        preds.append(int(v[1]))
+        labels.append(v[2]) 
+        scores.append(v[4])
 
+    auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=scores)['roc_auc']
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
     prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
     f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
     
-    return {'accuracy': acc, 'f1': f1, 'precision': prec, 'recall': rec, 
+    return {'accuracy': acc, 'f1': f1, 'auc': auc,'precision': prec, 'recall': rec, 
         'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
 def n_upsamp(positive_label,negative_label):

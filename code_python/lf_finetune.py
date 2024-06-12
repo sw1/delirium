@@ -237,14 +237,15 @@ training_args = TrainingArguments(seed=params['s2'],
                                   logging_dir=os.path.join(out_dir,'log'),
                                   overwrite_output_dir=True,
                                   logging_strategy='steps',
-                                  logging_steps=250,
+                                  logging_steps=500, #250,
                                   save_strategy='steps',
-                                  save_steps=5000,
+                                  save_steps=500, #5000,
+                                  save_total_limit=1,
                                   
                                   evaluation_strategy='steps',
                                   #max_steps=50, # stopper for testing
-                                  eval_steps=250,
-                                  warmup_steps=500,
+                                  eval_steps=500, #250,
+                                  warmup_steps=1000, #500,
                                   
                                   load_best_model_at_end=True,
                                   metric_for_best_model='f1',
@@ -269,24 +270,12 @@ training_args = TrainingArguments(seed=params['s2'],
                                  )
 
 # functions to compute metrics
-def compute_metrics1(eval_pred):
+def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-    precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average='weighted')
-    acc = accuracy_score(labels, preds)
-    return {
-        'accuracy': acc,
-        'f1': f1,
-        'precision': precision,
-        'recall': recall,
-    }
-
-def compute_metrics2(eval_pred):
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-    preds_scores = np.max(logits, axis=-1)
+    scores = np.apply_along_axis(softmax, 1, logits)[:,1]
+    preds = np.where(scores > 0.5,1,0)
     
-    auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=preds_scores)['roc_auc']
+    auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=scores)['roc_auc']
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
     prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
@@ -317,7 +306,7 @@ trainer = cTrainer(
     train_dataset=d_train,
     eval_dataset=d_val,
     tokenizer=tokenizer,
-    compute_metrics=compute_metrics2,
+    compute_metrics=compute_metrics,
     callbacks = [EarlyStoppingCallback(early_stopping_patience=3)],
 )
 
