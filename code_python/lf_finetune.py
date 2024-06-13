@@ -281,7 +281,8 @@ def compute_metrics(eval_pred):
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
     f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
 
-    return {'accuracy': acc, 'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
+    return {'accuracy': acc, 'b_accuracy'= balanced_acc(labels,preds),
+            'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
             'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
 print('Training groups.')

@@ -251,3 +251,12 @@ def balance_data(x,s=123,cores=1):
             balanced_data = interleave_datasets([positive_label, negative_label])
 
     return(balanced_data)
+
+def balanced_acc(y,yhat):
+    
+    tp = sum(y)
+    p = sum(yhat)
+    tn = len(y)-tp
+    n = len(yhat)-n
+    
+    return((tp/p + tn/n)/2)

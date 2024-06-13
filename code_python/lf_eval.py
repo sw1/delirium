@@ -153,6 +153,7 @@ if pl == 1: # finetune with repo model
     model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
+    out_dir = out_finetune
 elif pl == 2: # finetune with pretrained model
     mod = os.path.join(out_pretrain_finetune,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
@@ -160,6 +161,7 @@ elif pl == 2: # finetune with pretrained model
     model2 = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
     tokenizer = AutoTokenizer.from_pretrained('yikuan8/Clinical-Longformer',
                                               use_fast=True,max_length=seq_len)
+    out_dir = out_pretrain_finetune
 elif pl == 3: # finetune with pretrained model that used custom tokenizer
     mod = os.path.join(out_token_pretrain_finetune,'model')
     conf = AutoConfig.from_pretrained(mod,num_labels=2,gradient_checkpointing=False)
@@ -178,13 +180,13 @@ elif pl == 3: # finetune with pretrained model that used custom tokenizer
     print("Resizing model 1 embedding layer from %s to %s." % (dim1,dim2))
     dim2 = str(model2.get_input_embeddings())
     print("Resizing model 2 embedding layer from %s to %s." % (dim1,dim2))
+    out_dir = out_token_pretrain_finetune
     
 print('\nModel output directory:\n%s' % out_dir) 
 
 tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
 
 conf.hidden_dropout_prob=0.1
-#conf.attention_probs_dropout_prob=0.1
 conf.classifier_dropout=0.1
 
 # tokenizer function
@@ -222,7 +224,8 @@ def compute_metrics(eval_pred):
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
     f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
 
-    return {'accuracy': acc, 'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
+    return {'accuracy': acc, 'b_accuracy'= balanced_acc(labels,preds),
+            'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
             'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
 print('Training groups.')
@@ -246,26 +249,16 @@ trainer = cTrainer(
     compute_metrics=compute_metrics
 )
 
+test_results = {}
+
 print('Validating.')
 res_eval = trainer.evaluate()
 print(res_eval)
-
-#testing_dump = {}
-#y_test = trainer.predict(d_test_icd)
-#testing_dump['y_icd'] = y_test
-#testing_dump['id_icd'] = d_test_icd['id']
-#y_test = trainer.predict(d_heldout)
-#testing_dump['y_ho'] = y_test
-#testing_dump['id_ho'] = d_heldout['id']
-#eval_fn = os.path.join('/home/swolosz1/shared/anesthesia/wolosomething/scratch/','eval_test_results.pkl')
-#print('\nSaving eval results to \n%s' % eval_fn)
-#with open(eval_fn, 'wb') as f:
-#    pickle.dump(testing_dump, f)
+test_results['eval'] = res_eval
 
 # performance adjusting for chunks since each chunk has the same label but
 # is associated with a different section. hence will take max logistic
 # score between chunks to yield final predicted label
-test_results = {}
 
 print('Testing icd labels.')
 y_test = trainer.predict(d_test_icd)
@@ -278,11 +271,6 @@ y_test = trainer.predict(d_heldout)
 print(compute_eval_metrics(y_test,d_heldout['id'],method=1))
 print(compute_eval_metrics(y_test,d_heldout['id'],method=2))
 test_results['heldout'] = y_test
-
-#eval_fn = os.path.join(out_dir,'eval_test_results.pkl')
-#print('\nSaving eval results to \n%s' % eval_fn)
-#with open(eval_fn, 'wb') as f:
-#    pickle.dump(test_results, f)
 
 pl1 = TextClassificationPipeline(model=model1.to('cpu'),tokenizer=tokenizer)
 pl2 = FillMaskPipeline(model2.to('cpu'),tokenizer=tokenizer)
@@ -306,16 +294,21 @@ print(pl1(s2))
 print(s3)
 print(pl1(s3))
 
+# tokenizer specific testing
 print(pl2("Patient had significant GERD and was scheduled for a <mask> \
 fundoplication procedure."))
 print(pl2("Patient was transferred from brigham and womens hospital and \
 admitted to beth <mask> deaconess."))
+
+# pt type
 print(pl2("A <mask> patient experienced delirium after a exploratory \
 laparotomy."))
 print(pl2("A <mask> patient experienced delirium after a laparoscopic \
 appendectomy."))
+
+# post op illness
 print(pl2("A patient had a exploratory laparotomy and experienced <mask> \
-#a day after the procedure."))
+a day after the procedure."))
 print(pl2("A patient had a laparoscopic appendectomy and experienced <mask> \
 a day after the procedure."))
 print(pl2("A frail old patient coming from a nursing home had a exploratory \
@@ -324,3 +317,21 @@ print(pl2("A frail old patient coming from a nursing home had a laparoscopic \
 appendectomy and experienced <mask> a day after the procedure."))
 print(pl2("A frail old patient coming from a nursing home had a hip \
 replacement and experienced <mask> a day after the procedure."))
+
+# seizure ms prompts
+print(pl2("The patient suffered a <mask>."))
+print(pl2("The patient experienced a <mask>."))
+print(pl2("The patients episode was a <mask>."))
+print(pl2("Patient with refractory <mask>."))
+print(pl2("Patient will undergo elective <mask>."))
+
+# slightly adapted prompts
+print(pl2("The patients delirium episode was due to <mask>."))
+print(pl2("The patients delirium episode was treated with <mask>."))
+print(pl2("Patient has a high likelihood of delirium so <mask> was ordered."))
+
+
+eval_fn = os.path.join(out_dir,'final_results.pkl')
+print('\nSaving eval results to \n%s' % eval_fn)
+with open(eval_fn, 'wb') as f:
+    pickle.dump(test_results, f)

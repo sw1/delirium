@@ -38,7 +38,7 @@ cat(glue('\n\nNumber of expert labeled samples: {nrow(tbl_test_expert)}\n\n'))
 tbl <- tbl %>%
   anti_join(tbl_test_expert,by='id') 
 
-cat(glue('\n\nNumber of samples after removing expert and heldout: ',
+cat(glue('\n\nNumber of samples after removing expert: ',
          '{nrow(tbl)}\n\n'))
 
 # pull 10% of samples from expert set for heldout (n=589)
