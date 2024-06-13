@@ -218,9 +218,9 @@ d_test_icd = d_test_icd.map(tokenize_dataset,batched=True,num_proc=cores)
 d_heldout = d_heldout.map(tokenize_dataset,batched=True,num_proc=cores)
 
 # balance minorty class via upsampling with replacement
-print('Balancing training and validation data.')
-d_train = balance_data(d_train,s=params['s1'],cores=cores)
-d_val = balance_data(d_val,s=params['s1'],cores=cores)
+#print('Balancing training and validation data.')
+#d_train = balance_data(d_train,s=params['s1'],cores=cores)
+#d_val = balance_data(d_val,s=params['s1'],cores=cores)
 
 
 conf.hidden_dropout_prob=params['do_hidden']
@@ -275,13 +275,18 @@ def compute_metrics(eval_pred):
     scores = np.apply_along_axis(softmax, 1, logits)[:,1]
     preds = np.where(scores > 0.5,1,0)
     
+    tn = sum([1 for i in range(len(preds)) if preds[i] == 0 and labels[i] == 0])
+    fp = sum([1 for i in range(len(preds)) if preds[i] == 1 and labels[i] == 0])
+    
     auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=scores)['roc_auc']
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
     prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
     f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
+    spec = tn/(tn + fp)
+    b_acc = (rec + spec)/2
 
-    return {'accuracy': acc, 'b_accuracy'= balanced_acc(labels,preds),
+    return {'accuracy': acc, 'b_accuracy': b_acc,
             'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
             'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
@@ -368,12 +373,14 @@ y_test = trainer.predict(d_test_icd)
 print(compute_eval_metrics(y_test,d_test_icd['id'],method=1))
 print(compute_eval_metrics(y_test,d_test_icd['id'],method=2))
 test_results['icd'] = y_test
+test_results['icd_ids'] = d_test_icd['id']
 
 print('Heldout labels.')
 y_test = trainer.predict(d_heldout)
 print(compute_eval_metrics(y_test,d_heldout['id'],method=1))
 print(compute_eval_metrics(y_test,d_heldout['id'],method=2))
 test_results['heldout'] = y_test
+test_results['heldout_ids'] = d_heldout['id']
 
 # save results
 with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:

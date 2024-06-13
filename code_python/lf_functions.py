@@ -208,14 +208,20 @@ def compute_eval_metrics(res,test_ids,method=1):
         preds.append(int(v[1]))
         labels.append(v[2]) 
         scores.append(v[4])
+        
+    tn = sum([1 for i in range(len(preds)) if preds[i] == 0 and labels[i] == 0])
+    fp = sum([1 for i in range(len(preds)) if preds[i] == 1 and labels[i] == 0])
 
     auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=scores)['roc_auc']
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
     prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
     f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
+    spec = tn/(tn + fp)
+    b_acc = (rec + spec)/2
     
-    return {'accuracy': acc, 'f1': f1, 'auc': auc,'precision': prec, 'recall': rec, 
+    return {'accuracy': acc, 'b_accuracy': b_acc,
+            'f1': f1, 'auc': auc,'precision': prec, 'recall': rec, 
         'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
 def n_upsamp(positive_label,negative_label):
@@ -230,7 +236,7 @@ def n_upsamp(positive_label,negative_label):
         n_upsamp = 0
         
     return(n_upsamp)
-
+    
 def balance_data(x,s=123,cores=1):
     positive_label = x.filter(lambda example: example['labels']==1, num_proc=cores) 
     negative_label = x.filter(lambda example: example['labels']==0, num_proc=cores)
@@ -251,12 +257,3 @@ def balance_data(x,s=123,cores=1):
             balanced_data = interleave_datasets([positive_label, negative_label])
 
     return(balanced_data)
-
-def balanced_acc(y,yhat):
-    
-    tp = sum(y)
-    p = sum(yhat)
-    tn = len(y)-tp
-    n = len(yhat)-n
-    
-    return((tp/p + tn/n)/2)
