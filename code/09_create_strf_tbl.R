@@ -13,10 +13,10 @@ source(file.path(path,'code','fxns.R'))
 
 gc()
 
-master <- read_rds(file.path(path,'data_in','05_full_icd_tbl.rds'))
+master <- read_rds(file.path(path,'data_out','05_full_icd_tbl.rds'))
 
 # get feature selection results
-fs <- read_rds(file.path(path,'data_in','08_rf_fs.rds')) 
+fs <- read_rds(file.path(path,'data_out','08_rf_fs.rds')) 
 
 # select least complex model within 1 sd of best performing model based on rmse
 fs_best <- fs$perf %>%
@@ -88,7 +88,7 @@ master <- master %>%
   mutate(across(!label & everything(),~replace_na(.x, 0)))
 
 write_rds(master,file.path(path,
-                          'data_in',
+                          'data_out',
                           '09_alldat_preprocessed_for_pred.rds'))
 
 

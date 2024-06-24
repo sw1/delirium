@@ -52,7 +52,7 @@ master <- master %>%
   left_join(icds,by=c('code','code_type')) %>%
   group_by(id,set) %>%
   reframe(icd_codes=list(na.exclude(unique(code)))) %>%
-  left_join(read_rds(file.path(path,'data_in','03_tbl_final_wperiods.rds')) %>%
+  left_join(read_rds(file.path(path,'data_out','03_tbl_final_wperiods.rds')) %>%
               rename(icd_codes_del=icd_codes), 
             by='id') %>%
   distinct()
@@ -60,11 +60,28 @@ master <- master %>%
 # final preprocessing before saving master table
 master <- master %>%
   mutate(los=as.numeric(los),
+         month=month(admission_date),
+         year=year(admission_date),
+         july=if_else(month == 7,1,0),
+         july_august=if_else(month %in% 6:7,1,0),
+         covid1=if_else(
+           admission_date >= mdy('04/01/2020') & 
+             admission_date < mdy('04/01/2021'),
+           1,0),
+         covid2=if_else(
+           admission_date >= mdy('04/01/2020') & 
+             admission_date < mdy('04/01/2022'),
+           1,0),
+         covid3=if_else(
+           admission_date >= mdy('04/01/2020') & 
+             admission_date < mdy('04/01/2023'),
+           1,0),
+         month_academic=month(admission_date %m-% months(6)),
          discharge_date=as.numeric(discharge_date),
          len_pmhx=as.numeric(len_pmhx),
          label=as.factor(label)) 
 
 
-write_rds(master,file.path(path,'data_in','05_full_icd_tbl.rds'))
+write_rds(master,file.path(path,'data_out','05_full_icd_tbl.rds'))
 
 

@@ -1,10 +1,10 @@
-pacman::p_load(tidyverse,glue,Rtsne)
+pacman::p_load(tidyverse,glue,Rtsne,icd.data)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
 }
-if (Sys.info()['login'] == 'swolosz1'){
-  path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
+if (Sys.info()['login'] == 'sw424'){
+  path <- 'C:\\Users\\sw424\\Dropbox\\embeddings\\delirium'
 }
 source(file.path(path,'code','fxns.R'))
 
@@ -51,6 +51,63 @@ disagree <- tbl %>%
 
 fn <- 'tbl_to_python_expertupdate_chunked_rfst_majvote_th70_ns0.csv.gz'
 tbl <- read_csv(file.path(path,'to_python',fn))
+
+master %>% 
+  select(-label,-set) %>%
+  left_join(tbl %>% select(id,set,label,label_pseudo),by='id') %>%
+  mutate(year=year(as_date(discharge_date))) %>%
+  filter(str_detect(set,'expert')) %>%
+  group_by(label,year) %>%
+  reframe(n=n()) %>%
+  group_by(year) %>%
+  mutate(mean=n/sum(n)) %>%
+  ggplot(aes(year,mean,fill=as.factor(label))) +
+  geom_bar(stat='identity',position='stack') 
+
+master %>% 
+  select(-label,-set) %>%
+  left_join(tbl %>% select(id,set,label,label_pseudo),by='id') %>%
+  filter(str_detect(set,'expert')) %>%
+  group_by(label,age) %>%
+  mutate(age=ntile(age,16)) %>%
+  group_by(label,age) %>%
+  reframe(n=n()) %>%
+  group_by(age) %>%
+  mutate(mean=n/sum(n)) %>%
+  ggplot(aes(age,mean,fill=as.factor(label))) +
+  geom_bar(stat='identity',position='stack') 
+
+master %>% 
+  select(-label,-set) %>%
+  left_join(tbl %>% select(id,set,label,label_pseudo),by='id') %>%
+  filter(str_detect(set,'expert')) %>%
+  ggplot(aes(x=count_del,fill=as.factor(label))) +
+  geom_density(alpha=.3,adjust=5) 
+
+master %>% 
+  select(-label,-set) %>%
+  left_join(tbl %>% select(id,set,label,label_pseudo),by='id') %>%
+  mutate(year=year(as_date(discharge_date))) %>%
+  filter(str_detect(set,'expert')) %>%
+  ggplot(aes(x=count_del,fill=as.factor(label))) +
+  geom_density(alpha=.3,adjust=5) +
+  facet_wrap(~year)
+    
+master %>% 
+  select(-label,-set) %>%
+  left_join(tbl %>% select(id,set,label,label_pseudo),by='id') %>%
+  mutate(year=year(as_date(discharge_date))) %>%
+  filter(str_detect(set,'expert')) %>%
+  ggplot(aes(year,los,color=as.factor(label))) +
+  stat_smooth(method='loess',se=FALSE)
+
+master %>% 
+  select(-label,-set) %>%
+  left_join(tbl %>% select(id,set,label,label_pseudo),by='id') %>%
+  mutate(year=year(as_date(discharge_date))) %>%
+  filter(str_detect(set,'expert')) %>%
+  ggplot(aes(year,len_pmhx,color=as.factor(label))) +
+  stat_smooth(method='loess',se=FALSE)
 
 tbl %>%
   select(id,hpi,hc,label_pseudo,label_icd) %>%

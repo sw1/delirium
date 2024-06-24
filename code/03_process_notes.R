@@ -11,7 +11,7 @@ if (Sys.info()['login'] == 'swolosz1'){
 }
 source(file.path(path,'code','fxns.R'))
 
-tbl_full <- read_rds(file.path(path,'data_in','02_merged_icd_tbl.rds'))
+tbl_full <- read_rds(file.path(path,'data_out','02_merged_icd_tbl.rds'))
 
 # split notes into sections by iterating over 200000 rows at a time
 # to save memory.
@@ -162,7 +162,9 @@ for (i in 2:(length(breaks)-1)){
 tbl <- tbl %>%
   distinct() %>%
   rowwise() %>%
-  mutate(hpi_hc=paste(c(history_of_present_illness,hospital_course),
+  mutate(history_of_present_illness=if_else(
+    is.na(history_of_present_illness),'',history_of_present_illness),
+         hpi_hc=paste(c(history_of_present_illness,hospital_course),
                       collapse=' ')) %>%
   ungroup() 
 
@@ -243,11 +245,13 @@ tbl <- tbl %>%
   filter(nchar(hpi_hc) > 100)
 
 # save the final table with period
-write_rds(tbl,file.path(path,'data_in','03_tbl_final_wperiods.rds'))
+write_rds(tbl,file.path(path,'data_out','03_tbl_final_wperiods.rds'))
 
 # remove periods from the final table and save
 tbl <- tbl %>%
   mutate_at(c('history_of_present_illness','hospital_course'),
             ~str_squish(trimws(str_replace_all(.x,'[[:punct:]]',''))))
 
-write_rds(tbl,file.path(path,'data_in','03_tbl_final.rds'))
+write_rds(tbl,file.path(path,'data_out','03_tbl_final.rds'))
+
+unlink(file.path(path,'data_tmp','*'),recursive=TRUE,force=TRUE)

@@ -10,7 +10,7 @@ if (Sys.info()['login'] == 'sw1'){
 }
 if (Sys.info()['login'] == 'swolosz1'){
   path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
-  all_cores <- 8
+  all_cores <- 16
 }
 source(file.path(path,'code','fxns.R'))
 
@@ -27,7 +27,7 @@ n_folds <- 5 # cv folds for feature selection
 
 p_feats <- c(0.99,0.975,0.95,0.9,0.85) # percentiles of feat imp to test
 
-dat <- read_rds(file.path(path,'data_in','07_rf_cv_params.rds'))
+dat <- read_rds(file.path(path,'data_out','07_rf_cv_params.rds'))
 
 master <- dat$dat
 
@@ -53,7 +53,7 @@ gc()
 fit <- ranger(
   formula=label ~ ., 
   data=master %>% 
-    filter(set == 'train') %>% 
+    filter(set == 'expert') %>% 
     select(-id,-set), 
   num.trees=1500, 
   mtry=params$mtry[1],
@@ -103,7 +103,7 @@ perf <- foreach(i=1:nrow(combs),.combine='rbind',
   feat_subset <- paste0('^',features[1:combs$n_feats[i]],'$')
   
   train <- master %>% 
-    filter(set == 'train') %>% 
+    filter(set == 'expert') %>% 
     select(label,matches(feat_subset))
   
   fit <- ranger(
@@ -123,11 +123,11 @@ perf <- foreach(i=1:nrow(combs),.combine='rbind',
   sqrt_err <- sqrt(fit$prediction.error)
   
   y <- master %>% 
-    filter(set == 'test') %>% 
+    filter(set == 'test_expert') %>% 
     pull(label)
   
   yhat <- predict(fit,master %>% 
-                    filter(set == 'test') %>% 
+                    filter(set == 'test_expert') %>% 
                     select(label,matches(feat_subset)))$predictions
   
   conf <- confusionMatrix(table(y,yhat),
@@ -147,6 +147,7 @@ perf <- foreach(i=1:nrow(combs),.combine='rbind',
   
   perf_round <- perf %>% 
     mutate(across(where(is.numeric),~round(.x,4))) 
+  
   cat(glue('\n\n(i={i}): mtry={perf_round$mtry[1]}, ',
            'min_node_perc={perf_round$min_node_perc[1]}, ',
            'n_feats={perf_round$n_feats[1]}, ',
@@ -161,7 +162,7 @@ cat('Saving output.')
 
 write_rds(list(features=feature_imp,
                perf=perf), 
-          file.path(path,'data_in','08_rf_fs.rds'))
+          file.path(path,'data_out','08_rf_fs.rds'))
 
 stopCluster(cl)
 

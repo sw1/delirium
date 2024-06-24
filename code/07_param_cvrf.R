@@ -23,39 +23,30 @@ s0 <- 235
 s1 <- 7829 # seed for upsamp
 s2 <- 123 # seed for rf sweep
 
-master <- read_rds(file.path(path,'data_in','06_dat_rf_cv_fs.rds'))
+master <- read_rds(file.path(path,'data_out','06_dat_rf_cv_fs.rds'))
 
-# take out heldout to upsample training data
-heldout <- master %>%
-  filter(set=='heldout_expert')
-
-master <- master %>%
-  anti_join(heldout,by='id')
-
-# take out testing set used for feature selection sweep later
-# making it larger so the splits make sense during testing but
-# can handle larger splits when applied to st with a lot of data
-set.seed(s0)
-test <- master %>%
-  group_by(label) %>%
-  sample_n(250) %>%
-  mutate(set='test')
-
-master <- master %>%
-  anti_join(test,by='id') %>%
-  mutate(set='train') 
-
-# upsample smaller class for balanced training
-set.seed(s1)
-master <- upsamp(master)
-
-# rebind heldout set
-master <- master %>% 
-  bind_rows(test) %>%
-  bind_rows(heldout) 
+# # take out testing and heldout to upsample training data
+# heldout <- master %>%
+#   filter(set == 'heldout_expert')
+# 
+# test <- master %>%
+#   filter(set == 'test_expert')
+# 
+# master <- master %>%
+#   anti_join(heldout,by='id') %>%
+#   anti_join(test,by='id')
+# 
+# # upsample smaller class for balanced training
+# set.seed(s1)
+# master <- upsamp(master)
+# 
+# # rebind heldout set
+# master <- master %>%
+#   bind_rows(test) %>%
+#   bind_rows(heldout)
 
 d_train <- master %>% 
-  filter(set == 'train') %>% 
+  filter(set == 'expert') %>% 
   select(-id,-set)
 
 params <- as_tibble(expand.grid(
@@ -100,7 +91,7 @@ cat('Saving output.')
 
 write_rds(list(params=out,
                dat=master), 
-          file.path(path,'data_in','07_rf_cv_params.rds'))
+          file.path(path,'data_out','07_rf_cv_params.rds'))
 
 stopCluster(cl)
 

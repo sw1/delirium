@@ -3,7 +3,8 @@ create_counts <- function(x,mem_save=FALSE,nurse=FALSE){
   cat('\nCreating counts.\n')
   x <- x %>%
     mutate(
-      count_del=1*str_count(hospital_course,'deliri| cam |cows'),
+      count_del=1*str_count(hospital_course,'deliri'),
+      count_cam=1*str_count(hospital_course,'cam | cam\\.'),
       count_postdel=1*str_count(
         hospital_course,'postop deli|postoperative deli'),
       count_del_dd=1*str_count(discharge_diagnosis,'deliri'),
@@ -75,7 +76,7 @@ create_counts <- function(x,mem_save=FALSE,nurse=FALSE){
         glue('haloperidol|haldol|olanz|symbyax|precedex|dexmedet|',
              'seroquel|quetiapine')),
       count_ciwa=1*str_count(
-        hospital_course,'ciwa|alcoho|withdraw|overdos|detox|tremens'),
+        hospital_course,'ciwa|alcoho|withdraw|overdos|detox|tremens|cows'),
       count_hep=1*str_count(
         hospital_course,
         'hepatit|hepatol|ascit|jaund|cirrh|varices|meld|portal'),

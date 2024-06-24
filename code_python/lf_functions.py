@@ -58,71 +58,89 @@ def print_summary(result):
     print(f"Samples/second: {result.metrics['train_samples_per_second']:.2f}")
     print_gpu_utilization()
 
-def read_data(fn,st,train_on_expert=True,finetuning=True):
+def read_data(fn,exp,th=None,fr=None,chunked=True):
     d = {s: {'id':[],'text':[],'labels':[]} 
-         for s in ['train','val','test_icd','test_expert','train_expert','heldout_expert']}
-    
+         for s in ['train','val','heldout_icd','heldout_expert']}
+
     reader = csv.reader(gzip.open(fn,mode='rt',encoding='utf-8'))
 
     header = next(reader, None)
-
+    
     idx_id = header.index('id')
     idx_text = header.index('hpi_hc')
-    idx_label = header.index('label')
+    idx_hpi = header.index('hpi')
+    idx_hc = header.index('hc')
+    idx_label_expert = header.index('label')
     idx_label_icd = header.index('label_icd')
     idx_set = header.index('set')
-    
-    if st:
-        idx_label_pseudo = header.index('label_pseudo')
-    
-    for row in reader:
 
+    if exp == 'full':
+        idx_label = header.index('label_fullexpert')
+    elif exp == 'only':
+        idx_label = header.index('label')
+    elif exp == 'pseudo':
+        idx_label = header.index('label_pseudo_th' + th + '_fr' + fr)
+    elif exp == 'icd':
+        idx_label = header.index('label_icd')
+
+    for row in reader:
         try:
             idn = int(row[idx_id])
         except ValueError:
             idn = int(float(row[idx_id]))
 
-        setn = row[idx_set]        
-        text = row[idx_text]
+        setn = row[idx_set]
         
-        if setn == 'train' or setn == 'val':
-            if st:
-                label = int(row[idx_label_pseudo])
-            else:
-                label = int(row[idx_label_icd])
-        elif setn == 'test_icd':
-            label = int(row[idx_label_icd])
-        elif setn == 'train_expert':
-            label = int(row[idx_label])
-            if train_on_expert:
-                setn = 'train'                
-        else:
-            label = int(row[idx_label])
-            
-        if finetuning:
-            if label != -1:
-                d[setn]['text'].append(text) 
+        if exp == 'pretrain':
+            if chunked:
                 d[setn]['id'].append(idn)
-                d[setn]['labels'].append(label)
-                
-                # add heldout samples to icd test set w/ icd labels
-                if setn == 'heldout_expert':
-                    label_icd = int(row[idx_label_icd])
-                    if label_icd != -1:                    
-                        d['test_icd']['text'].append(text) 
-                        d['test_icd']['id'].append(idn)
-                        d['test_icd']['labels'].append(label_icd)
-        else:
-            if setn == 'train' or setn == 'val':
-                d[setn]['labels'].append(label)
-                d[setn]['text'].append(text) 
-                d[setn]['id'].append(idn)
+                d[setn]['text'].append(row[idx_text]) 
+                d[setn]['labels'].append(-1)
             else:
-                if label != -1:
-                    d[setn]['text'].append(text) 
+                if idn not in d[setn]['id']:
                     d[setn]['id'].append(idn)
-                    d[setn]['labels'].append(label)
                     
+                    if len(row[idx_hpi]) > 0:
+                        note = row[idx_hpi] + ' ' + row[idx_hc]
+                    else:
+                        note = row[idx_hc]
+                    d[setn]['text'].append(note)
+                    
+                    d[setn]['labels'].append(-1)
+        else:
+            if setn == 'train':
+                label = int(row[idx_label])
+            elif setn == 'val':
+                label = int(row[idx_label_expert])
+            elif setn == 'heldout_expert':
+                label = int(row[idx_label_expert])
+                label_icd = int(row[idx_label_icd])
+            
+            if label != -1:
+                if chunked:
+                    d[setn]['id'].append(idn)
+                    d[setn]['text'].append(row[idx_text]) 
+                    d[setn]['labels'].append(label)
+
+                    if setn == 'heldout_expert':
+                        d['heldout_icd']['id'].append(idn)
+                        d['heldout_icd']['text'].append(row[idx_text])
+                        d['heldout_icd']['labels'].append(label_icd)
+
+                else:
+                    if idn not in d[setn]['id']:
+                        d[setn]['id'].append(idn)
+                        d[setn]['labels'].append(label)
+
+                        if len(row[idx_hpi]) > 0:
+                            note = row[idx_hpi] + ' ' + row[idx_hc]
+                        else:
+                            note = row[idx_hc]
+                        d[setn]['text'].append(note)
+
+                        if setn == 'heldout_expert':
+                            d['heldout_icd']['labels'].append(label_icd)            
+                
     return(d)
 
 def logit(p):

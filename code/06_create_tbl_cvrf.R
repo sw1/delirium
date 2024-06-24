@@ -13,7 +13,7 @@ source(file.path(path,'code','fxns.R'))
 
 col_filter <- 50 # filter  features with less than this many sample occurrences
 
-master <- read_rds(file.path(path,'data_in','05_full_icd_tbl.rds')) %>%
+master <- read_rds(file.path(path,'data_out','05_full_icd_tbl.rds')) %>%
   filter(!is.na(label))  # turn off for full data, note heldout removed below
 
 # create icd indicators
@@ -61,8 +61,13 @@ master <- create_counts(master,nurse=FALSE)
 
 # select features to be used for rfst
 master <- master %>%
-  select(id,set,label,los,discharge_date,sex,age,
+  select(id,set,label,
+         los,sex,age,
          num_meds,num_allergies,len_pmhx,
+         year,
+         month_academic,discharge_date,
+         starts_with('july'),
+         starts_with('covid'),
          starts_with('icd_'),starts_with('count_')) %>%
   select(-icd_sum) 
 
@@ -72,7 +77,7 @@ master <- master %>%
 
 cat(glue('\nNumber of features: {ncol(master)-3}.\n\n'))
 
-write_rds(master,file.path(path,'data_in','06_dat_rf_cv_fs.rds'))
+write_rds(master,file.path(path,'data_out','06_dat_rf_cv_fs.rds'))
 
 
 
