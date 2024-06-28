@@ -1,51 +1,24 @@
-import os
-import sys
-import shutil
-
-import gzip
 import csv
-import random
+import gzip
+import shutil
+import time
+import json
+import os
 import numpy as np
 import pandas as pd
-import math
-import statistics
-import pickle 
-import re
-
+import pickle
+import torch
+import evaluate
+import random
+from datasets import interleave_datasets, concatenate_datasets
+from scipy.special import softmax
 import matplotlib.pyplot as plt
 from pynvml import *
 from plotnine import *
 
-import torch
-from torch import nn
-
-import accelerate
-import transformers
-from transformers import (
-    AutoTokenizer, pipeline, DataCollatorForLanguageModeling, 
-    AutoModelForSequenceClassification, AdamW, AutoModelForMaskedLM, 
-    AutoConfig, TrainingArguments, Trainer, TextClassificationPipeline,
-    DataCollatorForLanguageModeling, FillMaskPipeline, LongformerModel,
-    LongformerTokenizer, LongformerForMaskedLM,
-    EarlyStoppingCallback, IntervalStrategy,
+from sklearn.metrics import (precision_recall_fscore_support,
+                             balanced_accuracy_score,
 )
-import tokenizers
-from tokenizers import (
-    decoders, models, normalizers, pre_tokenizers, processors,
-    trainers,Tokenizer,AddedToken,
-)
-from transformers.integrations import *
-import evaluate
-
-import datasets
-from datasets import (
-    load_dataset, Dataset, load_metric, DatasetDict,
-    concatenate_datasets, interleave_datasets,
-)
-
-from sklearn.utils import compute_class_weight
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
-from sklearn.model_selection import train_test_split
 
 def print_gpu_utilization():
     nvmlInit()
@@ -58,7 +31,7 @@ def print_summary(result):
     print(f"Samples/second: {result.metrics['train_samples_per_second']:.2f}")
     print_gpu_utilization()
 
-def read_data(fn,exp,th=None,fr=None,chunked=True):
+def read_data(fn,exp,th=None,fr=None):
     d = {s: {'id':[],'text':[],'labels':[]} 
          for s in ['train','val','heldout_icd','heldout_expert']}
 
@@ -84,6 +57,9 @@ def read_data(fn,exp,th=None,fr=None,chunked=True):
         idx_label = header.index('label_icd')
 
     for row in reader:
+        label = -1
+        label_icd = -1
+        
         try:
             idn = int(row[idx_id])
         except ValueError:
@@ -92,54 +68,31 @@ def read_data(fn,exp,th=None,fr=None,chunked=True):
         setn = row[idx_set]
         
         if exp == 'pretrain':
-            if chunked:
-                d[setn]['id'].append(idn)
-                d[setn]['text'].append(row[idx_text]) 
-                d[setn]['labels'].append(-1)
-            else:
-                if idn not in d[setn]['id']:
-                    d[setn]['id'].append(idn)
-                    
-                    if len(row[idx_hpi]) > 0:
-                        note = row[idx_hpi] + ' ' + row[idx_hc]
-                    else:
-                        note = row[idx_hc]
-                    d[setn]['text'].append(note)
-                    
-                    d[setn]['labels'].append(-1)
+            d[setn]['id'].append(idn)
+            d[setn]['text'].append(row[idx_text]) 
+            d[setn]['labels'].append(-1)
         else:
             if setn == 'train':
                 label = int(row[idx_label])
-            elif setn == 'val':
+            elif setn == 'val' and not exp == 'icd':
                 label = int(row[idx_label_expert])
+            elif setn == 'val' and exp == 'icd':
+                label = int(row[idx_label])
             elif setn == 'heldout_expert':
                 label = int(row[idx_label_expert])
                 label_icd = int(row[idx_label_icd])
+            else:
+                break
             
             if label != -1:
-                if chunked:
-                    d[setn]['id'].append(idn)
-                    d[setn]['text'].append(row[idx_text]) 
-                    d[setn]['labels'].append(label)
+                d[setn]['id'].append(idn)
+                d[setn]['text'].append(row[idx_text]) 
+                d[setn]['labels'].append(label)
 
-                    if setn == 'heldout_expert':
-                        d['heldout_icd']['id'].append(idn)
-                        d['heldout_icd']['text'].append(row[idx_text])
-                        d['heldout_icd']['labels'].append(label_icd)
-
-                else:
-                    if idn not in d[setn]['id']:
-                        d[setn]['id'].append(idn)
-                        d[setn]['labels'].append(label)
-
-                        if len(row[idx_hpi]) > 0:
-                            note = row[idx_hpi] + ' ' + row[idx_hc]
-                        else:
-                            note = row[idx_hc]
-                        d[setn]['text'].append(note)
-
-                        if setn == 'heldout_expert':
-                            d['heldout_icd']['labels'].append(label_icd)            
+            if setn == 'heldout_expert' and label_icd != -1:
+                d['heldout_icd']['id'].append(idn)
+                d['heldout_icd']['text'].append(row[idx_text])
+                d['heldout_icd']['labels'].append(label_icd)      
                 
     return(d)
 
@@ -148,9 +101,6 @@ def logit(p):
 
 def inv_logit(p):
     return np.exp(p) / (1 + np.exp(p))
-
-def softmax(x):
-    return np.exp(x) / np.sum(np.exp(x), axis=0)
 
 def group_preds(predictions,ids):
     
@@ -214,31 +164,19 @@ def majority_vote(res_dict,method):
 
     return(maj_dict)
 
-def compute_eval_metrics(res,test_ids,method=1):
+def compute_eval_metrics(res,test_ids):
     
-    grouped = group_preds(res,test_ids)
-    mv = majority_vote(grouped,method)
-    
-    preds = list()
-    labels = list()
-    scores = list()
-    for k,v in mv.items():  
-        preds.append(int(v[1]))
-        labels.append(v[2]) 
-        scores.append(v[4])
-        
-    tn = sum([1 for i in range(len(preds)) if preds[i] == 0 and labels[i] == 0])
-    fp = sum([1 for i in range(len(preds)) if preds[i] == 1 and labels[i] == 0])
+    scores = softmax(res,axis=1)
+    preds = np.argmax(scores, axis=1)
 
     auc = evaluate.load('roc_auc').compute(references=labels, prediction_scores=scores)['roc_auc']
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
     prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
     f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
-    spec = tn/(tn + fp)
-    b_acc = (rec + spec)/2
+    bacc = balanced_accuracy_score(y_true=labels,y_pred=preds)
     
-    return {'accuracy': acc, 'b_accuracy': b_acc,
+    return {'accuracy': acc, 'b_accuracy': bacc,
             'f1': f1, 'auc': auc,'precision': prec, 'recall': rec, 
         'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
 
@@ -255,13 +193,12 @@ def n_upsamp(positive_label,negative_label):
         
     return(n_upsamp)
     
-def balance_data(x,s=123,cores=1):
+def balance_data(x,cores=1):
     positive_label = x.filter(lambda example: example['labels']==1, num_proc=cores) 
     negative_label = x.filter(lambda example: example['labels']==0, num_proc=cores)
 
     n_us = n_upsamp(positive_label,negative_label)
 
-    random.seed(s)
     seeds = random.sample(range(9999), n_us)
 
     balanced_data = None
@@ -275,3 +212,168 @@ def balance_data(x,s=123,cores=1):
             balanced_data = interleave_datasets([positive_label, negative_label])
 
     return(balanced_data)
+
+def get_class_weights(data, num_labels):
+    #class_weights = (1/pd.DataFrame(data).labels.value_counts(normalize=True).sort_index()).tolist()
+    class_weights = (pd.DataFrame(data).shape[0]/(pd.DataFrame(data).labels.value_counts(normalize=False) * num_labels).sort_index()).tolist()
+    class_weights = torch.as_tensor(class_weights)
+    class_weights = class_weights/class_weights.sum()
+    
+    return(class_weights)
+
+def print_vars(args,file=None):
+    for key, value in args.items():
+        print(f"{key}: {value}",file=file)
+        
+def check_and_save_params(model_args, tune_args, sweep_args, out_dir, folder_fn):
+
+    params = {**vars(model_args), **vars(tune_args), **vars(sweep_args)}
+    param_path = os.path.join(out_dir,'params.json')
+    folder_fn_old = folder_fn
+    
+    ft_dir = os.path.dirname(os.path.dirname(out_dir))
+    
+    if os.path.isdir(ft_dir):
+        folder_names = [d for d in os.listdir(ft_dir) if folder_fn_old in d] 
+        match = False
+        empty = False
+        if len(folder_names) > 0:
+            params_new = json.loads(json.dumps(params))
+            for fn in folder_names:
+                param_path_old = os.path.join(ft_dir,fn,'final_model_finetune','params.json')
+                
+                if os.path.exists(param_path_old):
+                    with open(param_path_old,'r') as f:
+                        params_old = json.load(f)
+                else:
+                    empty = True
+                    
+                if empty or params_old == params:
+                    folder_fn = fn
+                    
+                    if tune_args.override_prompt:
+                        while True:
+                            user_input = input(f"\nSame model parameterization exists for run {folder_fn}. How would you like to proceed? (overwrite/rename/exit):   ")
+                            if user_input.lower() in ['overwrite','o']:
+                                print(f"Overwriting {folder_fn}.")
+                                out_dir = os.path.dirname(out_dir)
+                                param_path = os.path.join(out_dir,'params.json')
+                                shutil.rmtree(out_dir)
+                                match = True
+                                break
+                            elif user_input.lower() in ['rename','r']:
+                                folder_fn += '_' + str(round(time.time()))
+                                print(f"Changing folder name to {folder_fn}")
+                                out_dir = out_dir.replace(folder_fn_old,folder_fn)
+                                param_path = os.path.join(out_dir,'params.json')
+                                match = True
+                                break
+                            elif user_input.lower() in ['exit','e']:
+                                print('Ending run.')
+                                sys.exit()
+                            else:
+                                print("Invalid input. Please enter 'overwrite', 'rename', or 'exit'.")
+                    else:
+                        print(f"\nSame model parameterization exists for run {folder_fn}. Overwriting folder.")
+                        out_dir = os.path.dirname(out_dir)
+                        param_path = os.path.join(out_dir,'params.json')
+                        shutil.rmtree(out_dir)
+                        match = True
+                        break
+                    
+            if not match:
+                folder_fn += '_' + str(round(time.time()))
+                print(f"\nSimilar model with different parameterization exists, changing folder name to {folder_fn}.")
+                out_dir = out_dir.replace(folder_fn_old,folder_fn)
+                param_path = os.path.join(out_dir,'params.json')
+
+    os.makedirs(out_dir)    
+    with open(param_path, 'w') as f:
+        json.dump(params, f)
+            
+    return out_dir, folder_fn
+
+
+def pull_results(log_history):
+    res_eval = []
+    res_loss = []
+    res_lr = []
+    e_step = None
+    t_step = None
+    for r in log_history:
+        try:
+            res_eval.append([r['step'],r['eval_loss'],
+                             r['eval_b_accuracy'],r['eval_f1']])
+            e_loss = r['eval_loss']
+            e_step = r['step']
+            if e_step != None and t_step != None:
+                if e_step == t_step:
+                    res_loss.append([e_step,e_loss,t_loss])
+        except KeyError:
+            try:
+                t_loss = r['loss']
+                t_step = r['step']
+                res_lr.append([t_step,r['learning_rate']])
+                if e_step != None and t_step != None:
+                    if e_step == t_step:
+                        res_loss.append([e_step,e_loss])
+            except KeyError:
+                next
+    
+    return res_eval, res_loss, res_lr
+
+def process_log_history(sweep_args,log_history,out_dir):
+
+    # save trainer_history
+    with open(os.path.join(out_dir,'log_history.pkl'), 'wb') as f:
+        pickle.dump(log_history, f)
+        
+    res_eval, res_loss, res_lr = pull_results(log_history)
+
+    # loss figure
+    df = pd.DataFrame(res_loss,columns=['step','eval_loss','train_loss'])
+    plt.figure()
+    plt.plot(df['step'],df['eval_loss'],label='eval_loss')
+    plt.plot(df['step'],df['train_loss'],label='train_loss')
+    plt.legend()
+    plt.savefig(os.path.join(out_dir,'figure1.png'))
+    
+    # lr figure
+    df = pd.DataFrame(res_lr,columns=['step','lr'])
+    plt.figure()
+    plt.plot(df['step'],df['lr'])
+    plt.legend()
+    plt.savefig(os.path.join(out_dir,'figure2.png'))
+
+    if sweep_args.train_method == 'finetune':
+        # performance figure
+        df = pd.DataFrame(res_eval,columns=['step','loss','b_acc','f1'])
+        plt.figure()
+        plt.plot(df['step'],df['b_acc'],label='b_acc')
+        plt.plot(df['step'],df['f1'],label='f1')
+        plt.legend()
+        plt.savefig(os.path.join(out_dir,'figure3.png'))
+        
+def final_preds(out_dir,args=None,*kwargs):
+    print('\Final predictions.')
+
+    test_results = {}
+
+    with open(os.path.join(out_dir,'test_results.dat'), 'w') as f:
+        if args is not None:
+            print('\nRun args:')
+            print_vars(args,file=f)
+            
+        for y_name,y_x in kwargs.items():
+            y_hat = trainer.predict(y_x)
+            test_results[y_name] = y_hat
+
+            print(f"\nResults for table {y_name}",file=f)
+            print("\nResults for table {y_name}.")
+            for k,v in y_hat[2].items():
+                print(f"{k}: {v}",file=f)
+                print(f"{k}: {v}")
+            print('\n',file=f)
+
+    with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:
+        pickle.dump(test_results, f)

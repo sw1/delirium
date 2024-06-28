@@ -105,24 +105,3 @@ tbl <- tbl %>%
 
 tbl <- tbl %>%
   write_csv(file.path(path,'to_python','tbl.csv.gz'))
-
-# because notes will be split based on chunk char limit in llm, 
-tbl %>% 
-  rowwise() %>%
-  mutate(hpi_hc=if_else(nchar(hpi_hc) > 4096,
-                        chunk(hpi_hc),
-                        list(hpi_hc))) %>%
-  ungroup() %>%
-  unnest(hpi_hc) %>%
-  filter(nchar(hpi_hc) > 100) %>%
-  write_csv(file.path(path,'to_python','tbl_chunked4096.csv.gz'))
-
-tbl %>% 
-  rowwise() %>%
-  mutate(hpi_hc=if_else(nchar(hpi_hc) > 8192,
-                        chunk(hpi_hc),
-                        list(hpi_hc))) %>%
-  ungroup() %>%
-  unnest(hpi_hc) %>%
-  filter(nchar(hpi_hc) > 100) %>%
-  write_csv(file.path(path,'to_python','tbl_chunked8192.csv.gz'))
