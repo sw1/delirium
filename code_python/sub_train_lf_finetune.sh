@@ -6,19 +6,19 @@ SCRIPT="$WORK_DIR/lf_train.py"
 python $SCRIPT \
     --seed 14231 \
     --train_method 'finetune' \
-    --label 'icd' \
-    --override_prompt True \
+    --label 'pseudo' \
+    --overwrite_prompt True \
     --threshold 70 \
     --fraction 100 \
     --pipeline 1 \
     --seq_len 4096 \
-    --n_grad_accum 2 \
+    --n_grad_accum 1 \
     --n_grad_accum_eval 1 \
-    --n_batch 32 \
+    --n_batch 16 \
     --n_batch_eval 64 \
     --n_train_epochs 4 \
-    --lr 8e-6 \
-    --warmup_ratio 0.07 \
+    --lr 8e-06 \
+    --warmup_ratio 0.05 \
     --n_cycles 0.5 \
     --w_decay 0.01 \
     --f_log_steps 0.1 \
@@ -26,8 +26,8 @@ python $SCRIPT \
     --do_hidden 0.1 \
     --do_class 0.1 \
     --label_smoothing 0.0 \
-    --upsample True \
-    --class_weights False \
+    --upsample False \
+    --class_weights True \
     --filter_keywords False \
     --group_by_len True \
     --pad_max_len False \
@@ -36,10 +36,6 @@ python $SCRIPT \
     --num_labels 2 \
     --input_table 'tbl.csv.gz' \
     --work_dir "$WORK_DIR/longformer" \
-    #--n_steps_testing 10 \
-    #--f_subset_data 0.05 \
-    #--folder_suffix 'testing1234' \
-    #--out_dir 'shared/anesthesia/wolosomething/scratch' \
-
+    --testing False 
 
 exit 0

@@ -6,7 +6,7 @@ SCRIPT="$WORK_DIR/lf_train.py"
 python $SCRIPT \
     --seed 14231 \
     --train_method 'pretrain' \
-    --label 'icd' \
+    --label 'pretrain' \
     --override_prompt True \
     --threshold 70 \
     --fraction 100 \
@@ -36,10 +36,7 @@ python $SCRIPT \
     --num_labels 2 \
     --input_table 'tbl.csv.gz' \
     --work_dir "$WORK_DIR/longformer" \
-    #--n_steps_testing 10 \
-    #--f_subset_data 0.05 \
-    #--folder_suffix 'testing1234' \
-    #--out_dir 'shared/anesthesia/wolosomething/scratch' \
+    --testing False 
 
 
 exit 0

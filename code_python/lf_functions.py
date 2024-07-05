@@ -15,6 +15,7 @@ from scipy.special import softmax
 import matplotlib.pyplot as plt
 from pynvml import *
 from plotnine import *
+import subprocess
 
 from sklearn.metrics import (precision_recall_fscore_support,
                              balanced_accuracy_score,
@@ -52,9 +53,9 @@ def read_data(fn,exp,th=None,fr=None):
     elif exp == 'only':
         idx_label = header.index('label')
     elif exp == 'pseudo':
-        idx_label = header.index('label_pseudo_th' + th + '_fr' + fr)
+        idx_label = header.index('label_pseudo_th' + str(th) + '_fr' + str(fr))
     elif exp == 'icd':
-        idx_label = header.index('label_icd')
+        idx_label = idx_label_icd
 
     for row in reader:
         label = -1
@@ -77,12 +78,10 @@ def read_data(fn,exp,th=None,fr=None):
             elif setn == 'val' and not exp == 'icd':
                 label = int(row[idx_label_expert])
             elif setn == 'val' and exp == 'icd':
-                label = int(row[idx_label])
+                label = int(row[idx_label_icd])
             elif setn == 'heldout_expert':
                 label = int(row[idx_label_expert])
                 label_icd = int(row[idx_label_icd])
-            else:
-                break
             
             if label != -1:
                 d[setn]['id'].append(idn)
@@ -214,7 +213,6 @@ def balance_data(x,cores=1):
     return(balanced_data)
 
 def get_class_weights(data, num_labels):
-    #class_weights = (1/pd.DataFrame(data).labels.value_counts(normalize=True).sort_index()).tolist()
     class_weights = (pd.DataFrame(data).shape[0]/(pd.DataFrame(data).labels.value_counts(normalize=False) * num_labels).sort_index()).tolist()
     class_weights = torch.as_tensor(class_weights)
     class_weights = class_weights/class_weights.sum()
@@ -249,14 +247,15 @@ def check_and_save_params(model_args, tune_args, sweep_args, out_dir, folder_fn)
                     empty = True
                     
                 if empty or params_old == params:
+                    
                     folder_fn = fn
                     
-                    if tune_args.override_prompt:
+                    if tune_args.overwrite_prompt:
                         while True:
                             user_input = input(f"\nSame model parameterization exists for run {folder_fn}. How would you like to proceed? (overwrite/rename/exit):   ")
                             if user_input.lower() in ['overwrite','o']:
                                 print(f"Overwriting {folder_fn}.")
-                                out_dir = os.path.dirname(out_dir)
+                                out_dir = out_dir.replace(folder_fn_old,folder_fn)
                                 param_path = os.path.join(out_dir,'params.json')
                                 shutil.rmtree(out_dir)
                                 match = True
@@ -354,26 +353,36 @@ def process_log_history(sweep_args,log_history,out_dir):
         plt.legend()
         plt.savefig(os.path.join(out_dir,'figure3.png'))
         
-def final_preds(out_dir,args=None,*kwargs):
-    print('\Final predictions.')
+def final_preds(out_dir, args=None, **kwargs):
+    print('\nFinal predictions.')
 
     test_results = {}
 
     with open(os.path.join(out_dir,'test_results.dat'), 'w') as f:
         if args is not None:
             print('\nRun args:')
-            print_vars(args,file=f)
+            print_vars(args, file=f)
             
-        for y_name,y_x in kwargs.items():
+        for y_name, y_x in kwargs.items():
             y_hat = trainer.predict(y_x)
             test_results[y_name] = y_hat
 
-            print(f"\nResults for table {y_name}",file=f)
+            print(f"\nResults for table {y_name}", file=f)
             print("\nResults for table {y_name}.")
-            for k,v in y_hat[2].items():
-                print(f"{k}: {v}",file=f)
+            for k, v in y_hat[2].items():
+                print(f"{k}: {v}", file=f)
                 print(f"{k}: {v}")
-            print('\n',file=f)
+            print('\n', file=f)
 
     with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:
         pickle.dump(test_results, f)
+    
+def sigfigs(number, digits=2):
+    format_string = "{:." + str(digits) + "e}"
+    return(format_string.format(number))
+
+def get_n_files():
+    output = subprocess.check_output(['cat', '/proc/sys/fs/file-nr'], 
+                                     universal_newlines=True).split()
+    output = [int(v) for v in output]
+    print(f"\nNumber of opened files: {round(output[0]/output[2],3)} ({output[0]}/{output[2]})")
