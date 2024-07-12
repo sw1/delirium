@@ -9,49 +9,70 @@ script = "lf_train.py"
 work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
 
 n_epoch = 0.4
-run = '0'
+run = 'cw_0'
 
 label = 'pseudo'
-th = 70
 fr = 100
-n_notes = len(read_data(os.path.join(work_dir,'longformer','data','tbl.csv.gz'),
-                        exp=label,th=th,fr=fr)['train']['text'])
 
-
-tune_grid = {'filter_keywords': [False,True],
-             'lr': [2e-6, 8e-6, 2e-5],
-             'w_decay': [0.001, 0.01, 0.1, 1.0],
-             'n_batch': [8, 16, 32, 64],
-             'lab_smooth': [0.0, 1e-1, 3e-1],
+tune_grid = {'filter_keywords': [False],
+             #'filter_keywords': [True,False],
+             #'th': [70,80,90],
+             'th': [80,90],
+             'lr': [2e-6,8e-6],
+             #'lr': [2e-6,8e-6,2e-5],
+             #'w_decay': [0.1,0.01,.001],
+             'w_decay': [0.01],
+             #'n_batch': [8,16,32,64],
+             'n_batch': [8,16,32],
+             #'lab_smooth': [0.3,0.15,0.0],
+             'lab_smooth': [0.0],
+             #'class_weighting': [0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99,1.0],
+             'class_weighting': [0.05,0.1,0.25,0.75],
              }
-
-
 
 all_combinations = list(itertools.product(*tune_grid.values()))
 tune_grid = pd.DataFrame(all_combinations, columns=tune_grid.keys())
+tune_grid = tune_grid.sample(frac=1).reset_index(drop=False)
 
 for i in range(len(tune_grid)):
     
+    out_dir = os.path.join(work_dir,'longformer','out','sweep','run_' + run)
+    
     filter_keywords = tune_grid['filter_keywords'][i]
+    th = tune_grid['th'][i]
     lr = tune_grid['lr'][i]
     w_decay = tune_grid['w_decay'][i]
     n_batch = tune_grid['n_batch'][i]
     lab_smooth = tune_grid['lab_smooth'][i]
+    class_weighting = tune_grid['class_weighting'][i]
     
     folder_name = ('fkw' + str(int(filter_keywords)) +
+                   '_th' + str(th) + 
                    '_lr' + sigfigs(lr,1) +
                    '_wd' + sigfigs(w_decay,1) + 
                    '_nb' + str(n_batch) + 
-                   '_ns' + sigfigs(lab_smooth,1)
+                   '_ls' + sigfigs(lab_smooth,1) +
+                   '_cw' + str(int(class_weighting * 100))
     )
+    
+    try:
+        os.makedirs(os.path.join(out_dir,folder_name))
+    except FileExistsError:
+        print(f"\nTrial output exists for {folder_name}. Moving to next trial.\n")
+        continue
         
+    print(f"\nTune grid for iteration {i}.\n")
+    print(tune_grid.iloc[i])
+        
+    n_notes = len(read_data(os.path.join(work_dir,'longformer','data','tbl.csv.gz'),
+                        exp=label,th=th,fr=fr)['train']['text'])
+    
     n_grad = 2 if n_batch == 64 else 1
     n_batch = 32 if n_batch == 64 else n_batch
+    cw = False if class_weighting == 0.5 else True
     
     n_steps_per_epoch = int(n_notes * n_epoch / n_batch / n_grad)
     log_steps = int(n_steps_per_epoch * 0.05)
-    
-    out_dir = os.path.join(work_dir,'longformer','out','sweep','run_' + run)
 
     command = [
         "python", script,
@@ -81,7 +102,8 @@ for i in range(len(tune_grid)):
         "--do_class", "0.1",
         "--label_smoothing", str(lab_smooth),
         "--upsample", "False",
-        "--class_weights", "True",
+        "--class_weights", str(cw),
+        "--class_weighting", str(class_weighting),
         "--filter_keywords", str(filter_keywords),
         "--group_by_len", "True",
         "--pad_max_len", "False",
@@ -95,11 +117,6 @@ for i in range(len(tune_grid)):
         "--wandb_pn", "sweep_run_" + run,
     ]
     
-    if os.path.exists(os.path.join(out_dir,folder_name)):
-        print(f"\nTrial output exists for {folder_name}. Moving to next trial.\n")
-        next
-    else:
-        print(f"\nRunning trial {folder_name}.")
-        os.makedirs(os.path.join(out_dir,folder_name)) 
-        subprocess.run(command)
+    print(f"\nRunning trial {folder_name}.")
+    subprocess.run(command)
     
