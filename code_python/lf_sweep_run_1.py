@@ -6,7 +6,7 @@ import pandas as pd
 from lf_functions import sigfigs, read_data
 
 
-def run_from_cp(n_epoch = 1.0, run = 1, reduction_factor = 4):
+def run_from_cp(n_epoch = 1.0, reduction_factor = 4, run):
     
     script = "lf_train.py"  
     work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
@@ -111,4 +111,4 @@ def run_from_cp(n_epoch = 1.0, run = 1, reduction_factor = 4):
         print(f"\nRunning trial {folder_name}.")
         subprocess.run(command)
 
-run_from_cp(n_epoch = 1.0, run = 1, reduction_factor = 3)
+run_from_cp(n_epoch = 1.0, reduction_factor = 3, run = 1)
