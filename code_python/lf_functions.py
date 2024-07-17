@@ -32,7 +32,7 @@ def print_summary(result):
     print(f"Samples/second: {result.metrics['train_samples_per_second']:.2f}")
     print_gpu_utilization()
 
-def read_data(fn,exp,th=None,fr=None):
+def read_data(fn,exp,th=None,fr=None,limit=None):
     d = {s: {'id':[],'text':[],'labels':[]} 
          for s in ['train','val','heldout_icd','heldout_expert']}
 
@@ -317,7 +317,7 @@ def pull_results(log_history):
                     if e_step == t_step:
                         res_loss.append([e_step,e_loss])
             except KeyError:
-                next
+                continue
     
     return res_eval, res_loss, res_lr
 

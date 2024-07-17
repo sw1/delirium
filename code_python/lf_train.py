@@ -67,6 +67,7 @@ class SweepArgs:
     folder_fn: Optional[str] = field(default=None)
     wandb_pn: Optional[str] = field(default=None)
     load_cp: Optional[str] = field(default=None)
+    final_sweep: Optional[bool] = field(default=None)
     
     def __post_init__(self):
         valid_train_methods = ['pretrain','finetune']
@@ -106,7 +107,7 @@ class ModelArgs:
     n_train_epochs: Optional[float] = field(default=4)
     lr: Optional[float] = field(default=8e-06 )
     warmup_ratio: Optional[float] = field(default=0.07)
-    n_cycles: Optional[float] = field(default=0.5)
+    n_cycles: Optional[float] = field(default=0.0)
     label_smoothing: Optional[float] = field(default=0.0)
     do_hidden: Optional[float] = field(default=0.1)
     do_class: Optional[float] = field(default=0.1)
@@ -130,6 +131,7 @@ class TuneArgs:
     use_collator: Optional[bool] = field(default=True)
     out_dir: Optional[str] = field(default=None)
     overwrite_prompt: Optional[bool] = field(default=True)
+    early_stopping: Optional[bool] = field(default=False)
     
     def __post_init__(self):
         
@@ -267,7 +269,7 @@ def get_components(sweep_args,model_args,out_dir,folder_fn):
                     model = LongformerForSequenceClassification.from_pretrained(sweep_args.load_cp,config=conf)
                     tokenizer = AutoTokenizer.from_pretrained(sweep_args.load_cp,use_fast=True,max_length=4096)
             elif sweep_args.pipeline == 2: # finetune with pretrained model
-                mod = os.path.join(model_pretrain,'model') # pretrained mod
+                mod = os.path.join(model_pretrain,'model_trainer') # pretrained mod
                 conf = AutoConfig.from_pretrained(mod,num_labels=model_args.num_labels)
                 conf.hidden_dropout_prob=model_args.do_hidden
                 conf.classifier_dropout=model_args.do_class
@@ -276,7 +278,7 @@ def get_components(sweep_args,model_args,out_dir,folder_fn):
                                                           use_fast=True,max_length=model_args.num_labels)
                 out_dir = os.path.join(train_dir,'final_model_pretrain_finetune') # location to output mod, pl2
             elif sweep_args.pipeline == 3: # finetune with pretrained model that used custom tokenizer
-                mod = os.path.join(model_token_pretrain,'model') # pretrained mod using custom tok
+                mod = os.path.join(model_token_pretrain,'model_trainer') # pretrained mod using custom tok
                 conf = AutoConfig.from_pretrained(mod,num_labels=model_args.num_labels)
                 conf.hidden_dropout_prob=model_args.do_hidden
                 conf.classifier_dropout=model_args.do_class
@@ -296,10 +298,9 @@ def get_components(sweep_args,model_args,out_dir,folder_fn):
             conf = AutoConfig.from_pretrained(mod)
             model = AutoModelForMaskedLM.from_pretrained(mod,config=conf)
             
-            if pl == 1: # pretrain with repo model
+            if sweep_args.pipeline == 1: # pretrain with repo model
                 out_dir = os.path.join(train_dir,'model_pretrain') # loc for pretrained mod
-            if pl == 2: # pretrain with custom tokenizer
-                # obtain new tokens not in repo tokenizer then add them to repo tokenizer
+            if sweep_args.pipeline == 2: # pretrain with custom tokenizer
                 tokenizer, model = update_tokenizer(tokenizer,model,token_dir)
                 out_dir = os.path.join(train_dir,'model_token_pretrain') # loc for custom tok and pretrained mod
 
@@ -320,11 +321,17 @@ def get_data(model_args,sweep_args,tune_args):
             print(f"Class weights:\n0={class_weights[0]}\n1={class_weights[1]}") 
 
     if tune_args.filter_keywords:
-        print('\nFiltering keywords used in expert labeling.')
+        print('\nFiltering keywords from training set used in expert labeling.')
         for i in range(len(dat['train']['text'])):
-            note = dat['train']['text'][i]
-            note = note.replace('delirium','').replace('encephalopathy','')
-            dat['train']['text'][i] = note
+                note = dat['train']['text'][i]
+                note = note.replace('delirium','').replace('encephalopathy','')
+                dat['train']['text'][i] = note
+                
+    dat['heldout_expert_filtered'] = dat['heldout_expert'] 
+    for i in range(len(dat['heldout_expert_filtered']['text'])):
+        note = dat['heldout_expert_filtered']['text'][i]
+        note = note.replace('delirium','').replace('encephalopathy','')
+        dat['heldout_expert_filtered']['text'][i] = note
 
     d_train = Dataset.from_dict(dat['train'])
 
@@ -337,10 +344,11 @@ def get_data(model_args,sweep_args,tune_args):
     if sweep_args.train_method == 'finetune':
         d_heldout_icd = Dataset.from_dict(dat['heldout_icd'])
         d_heldout_expert = Dataset.from_dict(dat['heldout_expert'])
+        d_heldout_expert_filtered = Dataset.from_dict(dat['heldout_expert_filtered'])
     else:
         d_heldout_icd = d_heldout_expert = class_weights = None
 
-    return d_train, d_val, d_heldout_icd, d_heldout_expert, class_weights
+    return d_train, d_val, d_heldout_icd, d_heldout_expert, d_heldout_expert_filtered, class_weights
 
 def get_folder_fn(model_args,sweep_args):
     if sweep_args.train_method == 'finetune':   
@@ -350,8 +358,8 @@ def get_folder_fn(model_args,sweep_args):
         folder_fn += '_pl' + str(sweep_args.pipeline) 
         if model_args.folder_suffix is not None:
             folder_fn += '_' + model_args.folder_suffix 
-    else:
-        folder_fn = None
+    elif sweep_args.train_method == 'pretrain':
+        folder_fn = 'fit_' + 'pl' + str(sweep_args.pipeline) 
 
     return(folder_fn)
 
@@ -362,16 +370,22 @@ def main(model_args, tune_args, sweep_args):
     device, main.folder_fn = init(model_args, sweep_args)
     main.out_dir = os.path.join(model_args.work_dir,'out')
 
-    d_train, d_val, d_heldout_icd, d_heldout_expert, class_weights = get_data(model_args,sweep_args,tune_args)
+    d_train, d_val, d_heldout_icd, d_heldout_expert, d_heldout_expert_filtered, class_weights = get_data(model_args,sweep_args,tune_args)
     model, tokenizer, conf, main.out_dir = get_components(sweep_args,model_args,main.out_dir,main.folder_fn)
-    
+
     if tune_args.out_dir is not None:
         if sweep_args.sweep and sweep_args.folder_fn is not None:
             main.folder_fn = sweep_args.folder_fn
             main.out_dir = os.path.join(tune_args.out_dir,main.folder_fn)
         else:
             main.out_dir = os.path.join(tune_args.out_dir,'out')
-            print(f"Overwriting default output directory to {main.out_dir}.")
+            print(f"\nOverwriting default output directory to {main.out_dir}.")
+    elif sweep_args.train_method == 'pretrain':
+        try:
+            os.makedirs(main.out_dir)
+        except FileExistsError:
+            print(f"\nOutput folder exists: {main.out_dir}.")
+            sys.exit(1)
     else:   
         main.out_dir, main.folder_fn = check_and_save_params(model_args, tune_args, sweep_args, main.out_dir, main.folder_fn)
 
@@ -389,14 +403,21 @@ def main(model_args, tune_args, sweep_args):
         save_strategy = 'no'
         save_steps = 0
     else:
-        n_steps = int(len(d_train) * model_args.n_train_epochs / model_args.n_batch / model_args.n_grad_accum)
-        n_warmup = int(n_steps * model_args.warmup_ratio)
-        n_epochs = model_args.n_train_epochs
-        log_steps = int(n_steps * model_args.f_log_steps)
-        #log_steps = 100 if log_steps > 100 else log_steps
-        log_steps = model_args.log_steps if model_args.log_steps is not None else log_steps
-        save_strategy = 'steps'
-        save_steps = log_steps * model_args.save_multiplier
+        if sweep_args.train_method == 'finetune':
+            n_steps = int(len(d_train) * model_args.n_train_epochs / model_args.n_batch / model_args.n_grad_accum)
+            n_warmup = int(n_steps * model_args.warmup_ratio)
+            n_epochs = model_args.n_train_epochs
+            log_steps = int(n_steps * model_args.f_log_steps)
+            log_steps = model_args.log_steps if model_args.log_steps is not None else log_steps
+            save_strategy = 'steps'
+            save_steps = log_steps * model_args.save_multiplier
+        elif sweep_args.train_method == 'pretrain':
+            n_steps = int(len(d_train) * model_args.n_train_epochs / model_args.n_batch / model_args.n_grad_accum)
+            n_warmup = int(n_steps * model_args.warmup_ratio)
+            n_epochs = model_args.n_train_epochs
+            log_steps = int(n_steps // n_epochs)
+            save_strategy = 'steps'
+            save_steps = log_steps
     print(f"\nRun will be over {n_steps} training steps, {log_steps} evaluation steps, {n_warmup} warmup steps, and {n_epochs} epochs.")
 
     print('\nTokenizing training data.')
@@ -408,7 +429,8 @@ def main(model_args, tune_args, sweep_args):
         print('Tokenizing testing data.')
         d_heldout_icd = d_heldout_icd.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
         d_heldout_expert = d_heldout_expert.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
-
+        d_heldout_expert_filtered = d_heldout_expert.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
+        
         if tune_args.upsample:
             print('Upsampling training data.')
             d_train = balance_data(d_train,cores=model_args.n_cores)
@@ -421,7 +443,7 @@ def main(model_args, tune_args, sweep_args):
             data_collator.max_length = model_args.seq_len
             
     elif sweep_args.train_method == 'pretrain':
-        data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=0.15)
+        data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=0.15,pad_to_multiple_of=8)
         
     optimizer = torch.optim.AdamW(model.parameters(),lr=model_args.lr,weight_decay=model_args.w_decay)
     if sweep_args.sweep:
@@ -434,12 +456,16 @@ def main(model_args, tune_args, sweep_args):
                                                                            num_training_steps=n_steps,
                                                                            num_cycles=model_args.n_cycles,
                                                                           )
-        else:
+        elif model_args.n_cycles == 0.5:
             scheduler = get_cosine_schedule_with_warmup(optimizer=optimizer,
                                                         num_warmup_steps=n_warmup,
                                                         num_training_steps=n_steps,
                                                         num_cycles=model_args.n_cycles,
                                                        )
+        else:
+            scheduler = get_constant_schedule_with_warmup(optimizer=optimizer,
+                                                          num_warmup_steps=n_warmup)
+            
 
 
     if sweep_args.load_cp is None:
@@ -473,18 +499,18 @@ def main(model_args, tune_args, sweep_args):
             dataloader_num_workers = model_args.n_cores, 
             dataloader_persistent_workers = True,
             dataloader_pin_memory = True,
+            
+            group_by_length = tune_args.group_by_len,
 
             tf32 = True,
 
-            gradient_checkpointing = True,
-            gradient_checkpointing_kwargs = {'use_reentrant':False},
             gradient_accumulation_steps = model_args.n_grad_accum,
             eval_accumulation_steps = model_args.n_grad_accum_eval,
 
             per_device_train_batch_size = model_args.n_batch, 
             per_device_eval_batch_size = model_args.n_batch_eval, 
         )
-
+        
         if sweep_args.train_method == 'finetune':
             if sweep_args.sweep:
                 training_args.load_best_model_at_end = False
@@ -494,7 +520,25 @@ def main(model_args, tune_args, sweep_args):
             training_args.metric_for_best_model = 'b_accuracy'
             training_args.greater_is_better = True
             training_args.label_smoothing_factor = model_args.label_smoothing
-            training_args.group_by_length = tune_args.group_by_len
+            training_args.gradient_checkpointing = True
+            training_args.gradient_checkpointing_kwargs = {'use_reentrant':False}
+        elif sweep_args.train_method == 'pretrain':
+            training_args.gradient_checkpointing = False
+            #training_args.gradient_checkpointing_kwargs = {'use_reentrant':False}
+            training_args.tf32 = True
+            group_by_length = False
+            #auto_find_batch_size_size=True
+            #training_args.fp16 = True
+            #training_args.optim = 'adafactor'
+            #optimizer = None
+            
+        if sweep_args.sweep and sweep_args.final_sweep:
+            training_args.metric_for_best_model = 'b_accuracy'
+            training_args.greater_is_better = True
+            training_args.load_best_model_at_end = True
+            training_args.save_total_limit = 1
+            
+            
     else:
         training_args = torch.load(os.path.join(sweep_args.load_cp,'training_args.bin'))
         training_args.output_dir = main.out_dir
@@ -554,64 +598,88 @@ def main(model_args, tune_args, sweep_args):
 
         if sweep_args.train_method == 'finetune':
             trainer.compute_metrics = compute_metrics
-            if not sweep_args.sweep:
-                trainer.callbacks = [EarlyStoppingCallback(early_stopping_patience=10,early_stopping_threshold=0.005)]
             if tune_args.use_collator:
                 trainer.data_collator = data_collator
-
             # create headers for eval metric results file
             with open(os.path.join(main.out_dir,'eval_results.dat'), 'w') as f:
                 print('acc\tb_acc\tf1\tauc\tprec\trec\tbatch_len\tpred_pod\ttrue_pos\n',file=f)
         elif sweep_args.train_method == 'pretrain':
-            trainer.data_collator = data_collator
-
+            trainer.data_collator = data_collator            
+         
+        if tune_args.early_stopping:
+            trainer.callbacks = [EarlyStoppingCallback(early_stopping_patience=5,early_stopping_threshold=0.005)]
+            
         trainer.train()
 
-    #model.save_pretrained(os.path.join(main.out_dir,'model'))
     trainer.save_model(os.path.join(main.out_dir,'model_trainer')) 
     
-    if sweep_args.sweep:
-        res_eval = trainer.evaluate()
-        eval_b_acc = res_eval.get('eval_b_accuracy')
-        eval_prop_diff = res_eval.get('eval_prop_diff')
-        eval_score = res_eval.get('eval_score')
-        eval_res = {'filter_keywords': tune_args.filter_keywords,
-                    'th': sweep_args.threshold,
-                    'lr': model_args.lr,
-                    'w_decay': model_args.w_decay,
-                    'eff_n_batch': model_args.n_batch * model_args.n_grad_accum,
-                    'lab_smooth': model_args.label_smoothing,
-                    'b_acc': eval_b_acc,
-                    'prop_diff': eval_prop_diff,
-                    'score': eval_score,
-                    'cw': tune_args.class_weighting if tune_args.class_weights else 0.5,
-            
-        }
-        eval_res = pd.DataFrame([eval_res], columns=eval_res.keys())
-        eval_res.to_csv(os.path.join(main.out_dir,'eval_res.csv'),index=False)
-        
-        y_hat = trainer.predict(d_heldout_expert)
-        print("\nHeldout results.\n")
-        for k, v in y_hat[2].items():
-            print(f"{k}: {v}")
-            
-        with open(os.path.join(main.out_dir,'heldout.pkl'), 'wb') as f:
-            pickle.dump(y_hat, f)
-            
-        y_preds = np.argmax(y_hat[0], axis=1)
-        mm_ids = [d_heldout_expert['id'][i] for i in range(len(y_preds)) if y_preds[i] != y_hat[1][i]]
-        
-        with open(os.path.join(main.out_dir,'mm_ids.txt'), 'w') as f:
-            for id in mm_ids:
-                print(f'{id}\n',file=f)
-        
-        sys.exit()
+    if sweep_args.train_method == 'finetune':
+        if sweep_args.sweep:
+            res_eval = trainer.evaluate()
+            eval_b_acc = res_eval.get('eval_b_accuracy')
+            eval_prop_diff = res_eval.get('eval_prop_diff')
+            eval_score = res_eval.get('eval_score')
+            eval_res = {'filter_keywords': tune_args.filter_keywords,
+                        'th': sweep_args.threshold,
+                        'lr': model_args.lr,
+                        'w_decay': model_args.w_decay,
+                        'eff_n_batch': model_args.n_batch * model_args.n_grad_accum,
+                        'lab_smooth': model_args.label_smoothing,
+                        'b_acc': eval_b_acc,
+                        'prop_diff': eval_prop_diff,
+                        'score': eval_score,
+                        'cw': tune_args.class_weighting if tune_args.class_weights else 0.5,
 
-    process_log_history(sweep_args,trainer.state.log_history,main.out_dir)
-    
-    final_preds(out_dir=main.out_dir,
-                args={**vars(model_args), **vars(tune_args), **vars(sweep_args)},
-                **{'heldout_icd': d_heldout_icd, 'heldout_expert': d_heldout_expert})
+            }
+            eval_res = pd.DataFrame([eval_res], columns=eval_res.keys())
+            eval_res.to_csv(os.path.join(main.out_dir,'eval_res.csv'),index=False)
+
+            y_hat = trainer.predict(d_heldout_expert)
+            y_hat_filtered = trainer.predict(d_heldout_expert_filtered)
+
+            with open(os.path.join(main.out_dir,'heldout.pkl'), 'wb') as f:
+                pickle.dump(y_hat, f)
+
+            with open(os.path.join(main.out_dir,'heldout_filtered.pkl'), 'wb') as f:
+                pickle.dump(y_hat_filtered, f)
+
+            with open(os.path.join(main.out_dir,'mm_ids.txt'), 'w') as f:
+                print("Heldout results.\n",file=f)
+                for k, v in y_hat[2].items():
+                    print(f"{k}: {v}",file=f)
+
+                print("\nHeldout filtered results.\n",file=f)
+                for k, v in y_hat_filtered[2].items():
+                    print(f"{k}: {v}",file=f)
+
+                print("\nHeldout results.\n")
+                for k, v in y_hat[2].items():
+                    print(f"{k}: {v}")
+
+                print("\nHeldout filtered results.\n")
+                for k, v in y_hat_filtered[2].items():
+                    print(f"{k}: {v}")
+
+            y_preds = np.argmax(y_hat[0], axis=1)
+            mm_ids = [d_heldout_expert['id'][i] for i in range(len(y_preds)) if y_preds[i] != y_hat[1][i]]
+
+            with open(os.path.join(main.out_dir,'mm_ids.txt'), 'w') as f:
+                for id in mm_ids:
+                    print(f'{id}\n',file=f)
+
+            y_preds_filtered = np.argmax(y_hat_filtered[0], axis=1)
+            mm_ids_filtered = [d_heldout_expert['id'][i] for i in range(len(y_preds_filtered)) if y_preds_filtered[i] != y_hat_filtered[1][i]]
+
+            with open(os.path.join(main.out_dir,'mm_ids_filtered.txt'), 'w') as f:
+                for id in mm_ids_filtered:
+                    print(f'{id}\n',file=f)
+
+        else:
+            process_log_history(sweep_args,trainer.state.log_history,main.out_dir)
+
+            final_preds(out_dir=main.out_dir,
+                        args={**vars(model_args), **vars(tune_args), **vars(sweep_args)},
+                        **{'heldout_icd': d_heldout_icd, 'heldout_expert': d_heldout_expert})
 
 
 if __name__ == '__main__':

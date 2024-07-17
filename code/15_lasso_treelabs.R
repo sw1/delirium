@@ -50,7 +50,7 @@ x_test <- as_tibble(x_test) %>%
 
 labs <- train %>% select(starts_with('label')) %>% names()
 
-res <- tibble(labs) %>%
+tbl_res <- tibble(labs) %>%
   rename(fn=labs) %>%
   separate(fn,c('fit','label','threshold','fraction'),
            sep='_',fill='right',remove=FALSE) %>%
@@ -58,46 +58,67 @@ res <- tibble(labs) %>%
   mutate(label=if_else(is.na(label),'onlyexpert',label),
          threshold=as.integer(str_extract(threshold,'[0-9]+')),
          fraction=as.integer(str_extract(fraction,'[0-9]+'))) %>%
-  mutate(lambda=0,b_acc=0,prec=0,rec=0,f1=0,prop1=0)
+  mutate(lambda=0,b_acc=0,prec=0,rec=0,f1=0,prop1=0) %>%
+  crossing(w=c(-30,-20,-10,-5,0,5,10,20,30))
 
-for (i in seq_along(labs)){
+for (i in 1:nrow(tbl_res)){
   
-  lab <- labs[i]
-  
-  cat(glue('\n({i}) fitting lasso for {lab}\n\n',.na=NA))
+  cat(glue('\n({i}) fitting lasso for {tbl_res$fn[i]} ',
+           'with w={tbl_res$w[i]}\n\n',.na=NA))
   
   y_train <- train %>% 
-    select(id,y=all_of(lab)) %>%
+    select(id,y=all_of(tbl_res$fn[i])) %>%
     filter(y != -1)
   
-  # calculate weights for class imbalance
-  w <- nrow(y_train)/(table(y_train$y) * length(unique(y_train$y)))
-  #w <- 1/(table(y_train$y)/nrow(y_train))
-  w <- w/sum(w)
-  w <- w[y_train$y+1]
+  w <- if (tbl_res$w[i] >= 0) c(abs(tbl_res$w[i]),1) else c(1,abs(tbl_res$w[i]))
   
   x_train <- dv_train[as.character(y_train$id),]
   colnames(x_train) <- paste0('f',1:ncol(x_train))
   
   x_train <- as_tibble(x_train) %>%
-    #bind_cols(tibble(w=as.numeric(w))) %>%
-    #mutate(w=importance_weights(w)) %>%
-    bind_cols(y=as.factor(unname(y_train$y)))
-    
+    bind_cols(y=as.factor(unname(y_train$y))) 
+  
+  if (tbl_res$w[i] != 0) x_train <- x_train %>%
+    mutate(w=if_else(y == 1,w[2],w[1]),
+           w=importance_weights(w)) 
+  
   set.seed(s)
   
-  mod <- logistic_reg(penalty = tune(),mixture = 0.5) %>%
+  folds <- vfold_cv(x_train,strata=y,v=all_cores)
+  
+  mod <- logistic_reg(penalty = tune(),mixture = 1) %>%
     set_engine('glmnet') %>%
     set_mode('classification')
-    
-  lambda <- workflow() %>%
+  
+  rec <- recipe(y ~ .,data=x_train) %>%
+    step_normalize(all_numeric_predictors())
+  
+  wf <- workflow() %>%
     add_model(mod) %>%
-    #add_recipe(y ~ .,data=x_train) %>%
-    add_formula(y ~ .) %>%
-    #add_case_weights(w) %>%
-    tune_grid(resamples=vfold_cv(x_train,strata=y,v=all_cores),
-              grid=5,
-              metrics=metric_set(bal_accuracy)) %>% 
+    add_recipe(rec) 
+  
+  if (tbl_res$w[i] != 0) wf <- wf %>% add_case_weights(w) 
+  
+  mets <- metric_set(yardstick::sensitivity, yardstick::specificity,
+                     roc_auc,bal_accuracy)
+  
+  grid <- tibble(penalty = 10^seq(-3, 0, length.out = 5))
+  
+  res <- wf %>%
+    tune_grid(resamples=folds,grid=grid,metrics=mets) 
+  
+  # autoplot(res)
+  # 
+  # uwf <- wf %>%
+  #   remove_case_weights()
+  # 
+  # ures <- uwf %>%
+  #   tune_grid(resamples=folds,grid=grid,metrics=mets)
+  # 
+  # autoplot(ures)
+
+  
+  lambda <- res %>% 
     select_best(metric='bal_accuracy') %>%
     pull(penalty)
   
@@ -107,10 +128,10 @@ for (i in seq_along(labs)){
   
   wf <- workflow() %>%
     add_formula(y ~ .) %>%
-    #add_case_weights(w) %>%
     add_model(mod) 
-    
   
+  if (tbl_res$w[i] != 0) wf <- wf %>% add_case_weights(w) 
+    
   cal <- wf %>%
     fit_resamples(vfold_cv(x_train %>%
                              mutate(y=as.factor(if_else(
@@ -144,16 +165,17 @@ for (i in seq_along(labs)){
             table(tbl_yhat$pred)[2]/length(tbl_yhat$pred))
   names(perf) <- c('b_acc','prec','rec','f1','prop1')
   
-  res <- res %>%
+  tbl_res <- tbl_res %>%
     rows_update(as_tibble_row(perf) %>% 
                   mutate(lambda=lambda,
-                         fn=lab),
-                by='fn')
+                         fn=tbl_res$fn[i],
+                         w=tbl_res$w[i]),
+                by=c('fn','w'))
   
-  print(res %>% select(-fn),n=Inf)
+  print(tbl_res %>% select(-fn),n=i)
   
 }
 
-write_csv(res,file.path(path,'res','15_lasso_results.csv.gz'))
+write_csv(tbl_res,file.path(path,'res','15_lasso_results.csv.gz'))
 
 stopCluster(cl)

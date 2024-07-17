@@ -6,47 +6,41 @@ import pandas as pd
 from lf_functions import sigfigs, read_data
 
 
-def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
+def run_from_cp(n_epoch = 1, reduction_factor = 4):
     
     script = "lf_train.py"  
     work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
     sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
+
+    cw = [0.25,0.5,0.75]
+    fkw = [True,False]
+    ls = [0]
+    nb = [8,16]
+    lr = [0.000008]
+    th = [90]
+    wd = [0.1]
+    lab = ['pseudo','full','only']
     
-    label = 'pseudo'
-    fr = 100
+    combinations = list(itertools.product(lab,cw,fkw,ls,nb,lr,th,wd))
+    df = pd.DataFrame(combinations,
+                      columns=['label','cw', 'filter_keywords', 'lab_smooth', 'eff_n_batch', 'lr', 'th', 'w_decay'])
+    
+    out_dir = os.path.join(work_dir,'longformer','out','sweep','run_cw_bal')
+    
+    for i in range(len(df)):
 
-    df = pd.read_csv(os.path.join(sweep_path,'run_cw_' + str(run-1) + '.csv')).sort_values(by='score',ascending=False)   
-    top_n = len(df) // reduction_factor
-
-    for i in range(top_n):
-
-        out_dir = os.path.join(work_dir,'longformer','out','sweep','run_cw_' + str(run))
-
-        try:
-            path = os.path.join(sweep_path,'run_cw_' + str(run-1),df['path'][i])
-            cp_folders = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
-            cp_folders = [f for f in cp_folders if re.match(r'checkpoint-\d+', f)]
-            cp_folders = sorted(cp_folders, key=lambda f: int(f.split('-')[1]))
-            cp_folder = cp_folders[-1]
-        except IndexError:
-            path = os.path.join(sweep_path,'run_cw_' + str(run-2),df['path'][i])
-            cp_folders = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
-            cp_folders = [f for f in cp_folders if re.match(r'checkpoint-\d+', f)]
-            cp_folders = sorted(cp_folders, key=lambda f: int(f.split('-')[1]))
-            cp_folder = cp_folders[-1] 
-
-        path_cp = os.path.join(path,cp_folder)
-
+        label = df['label'][i]
         filter_keywords = df['filter_keywords'][i]
-        th = df['th'][i]
         lr = df['lr'][i]
         w_decay = df['w_decay'][i]
         n_batch = df['eff_n_batch'][i]
         lab_smooth = df['lab_smooth'][i]
         class_weighting = df['cw'][i]
+        th = df['th'][i]
 
-        folder_name = ('fkw' + str(int(filter_keywords)) +
-                       '_th' + str(th) + 
+        folder_name = (label +
+                       '_fkw' + str(int(filter_keywords)) +
+                       '_th' + str(th) +
                        '_lr' + sigfigs(lr,1) +
                        '_wd' + sigfigs(w_decay,1) + 
                        '_nb' + str(n_batch) + 
@@ -61,26 +55,24 @@ def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
             continue
 
         n_notes = len(read_data(os.path.join(work_dir,'longformer','data','tbl.csv.gz'),
-                            exp=label,th=th,fr=fr)['train']['text'])
+                            exp=label,th=th,fr=100)['train']['text'])
 
         n_grad = 2 if n_batch == 64 else 1
         n_batch = 32 if n_batch == 64 else n_batch
         cw = False if class_weighting == 0.5 else True
 
-        n_steps_per_epoch = int(n_notes * n_epoch / n_batch / n_grad)
-        log_steps = int(n_steps_per_epoch * 0.05)
+        n_steps = int(n_notes * n_epoch / n_batch / n_grad)
+        log_steps = int(n_steps * 0.05)
 
         command = [
             "python", script,
             "--sweep", "True",
             "--testing", "False",
-            "--load_cp", path_cp,
             "--seed", "14231",
             "--train_method", "finetune",
             "--label", label,
             "--overwrite_prompt", "False",
             "--threshold", str(th),
-            "--fraction", str(fr),
             "--pipeline", "1",
             "--seq_len", "4096",
             "--log_steps", str(log_steps),
@@ -90,8 +82,7 @@ def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
             "--n_batch_eval", "64",
             "--n_train_epochs", str(n_epoch),
             "--lr", str(lr),
-            "--warmup_ratio", "0",
-            "--n_cycles", "0.5",
+            "--warmup_ratio", "0.05",
             "--w_decay", str(w_decay),
             "--f_log_steps", "0.1",
             "--save_multiplier", "2",
@@ -111,11 +102,12 @@ def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
             "--out_dir", out_dir,
             "--work_dir", os.path.join(work_dir,"longformer"),
             "--folder_fn", folder_name,
-            "--wandb_pn", "sweep_run_cw_" + str(run),
-            "--final_sweep", "True"
+            "--wandb_pn", "sweep_run_cw_bal",
+            "--final_sweep", "False",
+            "--early_stopping","True"
         ]
 
         print(f"\nRunning trial {folder_name}.")
         subprocess.run(command)
 
-run_from_cp(run=3,n_epoch=4,reduction_factor=3)
+run_from_cp(n_epoch=4)

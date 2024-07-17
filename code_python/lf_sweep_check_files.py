@@ -6,7 +6,7 @@ import shutil
 import itertools
 from lf_functions import sigfigs
 
-run = 'cw_0'
+run = 'cw_bal'
 
 sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
 
@@ -88,4 +88,4 @@ def check_completion(run,sweep_path,rm=False):
     
     
 #fix_ebatch(run,sweep_path)
-check_completion(run,sweep_path,rm=False)
+check_completion(run,sweep_path,rm=True)

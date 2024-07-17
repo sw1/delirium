@@ -1,78 +1,29 @@
 import os
-import sys
+import shutil
 
-import gzip
-import csv
-import random
-import numpy as np
-import pandas as pd
-import math
-import statistics
+from datasets import Dataset
 
-import matplotlib.pyplot as plt
-from pynvml import *
-from plotnine import *
+from transformers import AutoTokenizer
 
-import torch
-from torch import nn
-
-import accelerate
-import transformers
-from transformers import (
-    AutoTokenizer, pipeline, DataCollatorForLanguageModeling, 
-    AutoModelForSequenceClassification, AdamW, AutoModelForMaskedLM, 
-    AutoConfig, TrainingArguments, Trainer, TextClassificationPipeline,
-    DataCollatorForLanguageModeling, FillMaskPipeline, LongformerModel,
-    LongformerTokenizer, LongformerForMaskedLM,
-    EarlyStoppingCallback, IntervalStrategy,
-)
-import tokenizers
-from tokenizers import (
-    decoders, models, normalizers, pre_tokenizers, processors,
-    trainers,Tokenizer,AddedToken, ByteLevelBPETokenizer,
-)
-from tokenizers.models import BPE
-from tokenizers.decoders import BPEDecoder
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Whitespace, BertPreTokenizer
-from tokenizers.normalizers import (
-    BertNormalizer, NFD, StripAccents, Replace, Strip,
-)
-from tokenizers.processors import TemplateProcessing, RobertaProcessing
-
-from transformers.integrations import *
-import evaluate
-
-import datasets
-from datasets import load_dataset, Dataset, load_metric, DatasetDict
-
-from sklearn.utils import compute_class_weight
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
-from sklearn.model_selection import train_test_split
-
-# import custom functions
-from lf_functions import *
-
-os.environ['WORLD_SIZE'] = '1'
-os.environ['MASTER_ADDR'] = 'localhost'
-os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
-
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-print('\n\nNumber of devices: %s.\n \
-    Device set to %s.\n' % (torch.cuda.device_count(),device))
+from lf_functions import read_data
 
 update_vocab_len = int(5e4) # size of new tokenizer
 min_freq = int(2) # filter word freq
 
-tbl_fn = 'tbl_to_python_expertupdate_chunked.csv.gz'
+tbl_fn = 'tbl.csv.gz'
 
 work_dir = '/home/swolosz1/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer'
 data_dir = os.path.join(work_dir,'data')
 out_dir = os.path.join(work_dir,'out')
-
 token_dir = os.path.join(out_dir,'token')
 
-dat = read_data(os.path.join(data_dir,tbl_fn),st=False,train_on_expert=False,finetuning=False)
+# create dir if doesnt exist
+if os.path.exists(token_dir):
+    shutil.rmtree(token_dir)
+os.makedirs(token_dir)
+
+print('Reading data.')
+dat = read_data(os.path.join(data_dir,tbl_fn),exp='pretrain')
 
 # just using training data for tokenization
 # no val samples which are saved strictly for validation during ft

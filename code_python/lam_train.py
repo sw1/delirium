@@ -29,6 +29,7 @@ from transformers import (
     AutoModelForMaskedLM,BitsAndBytesConfig,
     HfArgumentParser,
     EarlyStoppingCallback, set_seed,
+    get_constant_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
 )
 import tokenizers
@@ -61,20 +62,16 @@ class SweepArgs:
     Arguements for sweeping through Longformer params.
     """
     
-    train_method: str = field(default='finetune')
     threshold: Optional[int] = field(default=70)
     fraction: Optional[int] = field(default=100 )
     label: Optional[str] = field(default='only')
     pipeline: Optional[int] = field(default=1)
     
     def __post_init__(self):
-        valid_train_methods = ['pretrain','finetune']
         valid_thresholds = [60,70,80,90]
         valid_fractions = [20,35,50,75,100]
         valid_labels = ['icd','full','only','pseudo']
         valid_pipelines = [1,2,3]
-        if self.train_method not in valid_train_methods:
-            raise ValueError(f"Invalid value for train_method. Expected one of {valid_trains_methods}, but got {self.train_method}.")
         if self.threshold not in valid_thresholds:
             raise ValueError(f"Invalid value for threshold. Expected one of {valid_thresholds}, but got {self.threshold}.")
         if self.fraction not in valid_fractions:
@@ -95,7 +92,9 @@ class ModelArgs:
     n_cores: Optional[int] = field(default=16)
     seed: Optional[int] = field(default=None)
     seq_len: Optional[int] = field(default=4096)
+    testing: Optional[bool] = field(default=False)
     num_labels: Optional[int] = field(default=2)
+    log_steps: Optional[int] = field(default=None)
     n_grad_accum: Optional[int] = field(default=2)
     n_grad_accum_eval: Optional[int] = field(default=1)
     n_steps_testing: Optional[int] = field(default=None)
@@ -120,7 +119,7 @@ class ModelArgs:
     bnb_4bit_quant_type: Optional[str] = field(default='nf4')
     bnb_4bit_use_double_quant: Optional[bool] = field(default=True)
     bnb_4bit_compute_dtype: Optional[str] = field(default='bfloat16')
-    bnb_4bit_quant_storage: Optional[str] = field(default='bfloat16')
+    bnb_4bit_quant_storage_dtype: Optional[str] = field(default='bfloat16')
     lora_alpha: Optional[int] = field(default=16)
     lora_dropout: Optional[float] = field(default=0.1)
     lora_r: Optional[int] = field(default=8)
@@ -132,10 +131,7 @@ class ModelArgs:
         self.quant_storage_dtype = getattr(torch, self.bnb_4bit_quant_storage_dtype)
         self.mod_torch_dtype = getattr(torch, self.mod_torch_dtype)
         valid_mods= [8,70]
-        if self.train_method not in valid_train_methods:
-            raise ValueError(f"Invalid value for mod. Expected one of {valid_mods}, but got {self.mod}.")
-        else:
-            self.mod = 'meta-llama/Meta-Llama-3-8B' if self.mod is 8 else 'meta-llama/Meta-Llama-3-70B'
+        self.mod = 'meta-llama/Meta-Llama-3-8B' if self.mod == 8 else 'meta-llama/Meta-Llama-3-70B'
 
 @dataclass
 class TuneArgs:
@@ -144,12 +140,14 @@ class TuneArgs:
     """
     upsample: Optional[bool] = field(default=False)
     class_weights: Optional[bool] = field(default=True)
+    class_weighting: Optional[float] = field(default=None)
     filter_keywords: Optional[bool] = field(default=True)
     group_by_len: Optional[bool] = field(default=True)
     pad_max_len: Optional[bool] = field(default=False)
     use_collator: Optional[bool] = field(default=True)
     out_dir: Optional[str] = field(default=None)
     overwrite_prompt: Optional[bool] = field(default=True)
+    early_stopping: Optional[bool] = field(default=False)
     
     def __post_init__(self):
         
@@ -180,7 +178,7 @@ class wSFTTrainer(SFTTrainer):
         self.class_weights = torch.tensor(self.class_weights).to(self.args.device)
 
     def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.get('labels')[:,0]
+        labels = inputs.get('labels')
         
         outputs = model(**inputs)
         logits = outputs.get('logits')
@@ -199,8 +197,13 @@ def compute_metrics(eval_pred):
     acc = evaluate.load('accuracy').compute(predictions=preds, references=labels)['accuracy']
     prec = evaluate.load('precision').compute(predictions=preds, references=labels)['precision']
     rec = evaluate.load('recall').compute(predictions=preds, references=labels)['recall']
-    f1 = evaluate.load('f1').compute(predictions=preds, references=labels)['f1']
+    f1 = evaluate.load('f1').compute(predictions=preds,references=labels)['f1']
     bacc = balanced_accuracy_score(y_true=labels,y_pred=preds)
+    ppp = sum(preds)/len(preds)
+    ptp = sum(labels)/len(labels)
+    prop_diff = ppp-ptp
+    score = math.sqrt(bacc / 0.5 / (abs(prop_diff) + 1))
+
 
     with open(os.path.join(main.out_dir,'eval_results.dat'), 'a+') as f:
         print(str(round(acc,2)) + '\t' + str(round(bacc,2)) + '\t' +
@@ -210,18 +213,12 @@ def compute_metrics(eval_pred):
               str(sum(labels)) + '\n',file=f)
 
     return {'run_name': main.folder_fn,
-            'class_weights': tune_args.class_weights,
-            'upsample': tune_args.upsample,'accuracy': acc, 'b_accuracy': bacc, 
+            'accuracy': acc, 'b_accuracy': bacc, 
             'f1': f1, 'auc': auc, 'precision': prec, 'recall': rec, 
-            'batch_length': len(preds),'pred_positive': sum(preds), 'true_positive': sum(labels)}
+            'prop_pred_positive': ppp, 'prop_true_positive': ptp,
+            'prop_diff': prop_diff, 'score': score}
 
 def init(model_args, sweep_args):
-    os.environ['WORLD_SIZE'] = '1'
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = str(random.randint(1000, 9999))
-    os.environ["WANDB_PROJECT"]= 'lf_finetune'
-    os.environ["WANDB_LOG_MODEL"] = 'false'
-    
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     print(f"\nCuda device: {device}")
     
@@ -242,121 +239,65 @@ def init(model_args, sweep_args):
     return device, main.folder_fn
 
 def get_components(sweep_args,model_args,quantization_config,out_dir,folder_fn):
-        
-        print(f"\nRunning {sweep_args.train_method} pipeline {sweep_args.pipeline}.")    
-        
-        if sweep_args.train_method == 'finetune':   
             
-            train_dir = os.path.join(out_dir,'finetune',folder_fn) # needs a unique folder since labels/strf
-            
-            if sweep_args.pipeline == 1: # finetune with repo model
-                model = AutoModelForSequenceClassification.from_pretrained(model_args.mod,
-                                                                           #quantization_config=bnb_config,
-                                                                           trust_remote_code=True,
-                                                                           model_args.mod_load_in_8bit,
-                                                                           attn_implementation='flash_attention_2',
-                                                                           model_args.mod_torch_dtype,
-                                                                           num_labels=model_args.num_labels)
-                tokenizer = AutoTokenizer.from_pretrained(model_args.mod,max_length=model_args.seq_len)
-                tokenizer.pad_token_id = tokenizer.eos_token_id
-                tokenizer.pad_token = tokenizer.eos_token
-                model.config.pad_token_id = tokenizer.pad_token_id
-                out_dir = os.path.join(train_dir,'final_model_finetune') # location to output mod, pl1
-            elif sweep_args.pipeline == 2: # finetune with pretrained model
-                mod = os.path.join(model_pretrain,'model') # pretrained mod
-                model = AutoModelForSequenceClassification.from_pretrained(mod)
-                tokenizer = AutoTokenizer.from_pretrained(model_args.mod,
-                                                          use_fast=True,max_length=model_args.num_labels)
-                tokenizer.pad_token_id = tokenizer.eos_token_id
-                tokenizer.pad_token = tokenizer.eos_token
-                out_dir = os.path.join(train_dir,'final_model_pretrain_finetune') # location to output mod, pl2
-            elif sweep_args.pipeline == 3: # finetune with pretrained model that used custom tokenizer
-                mod = os.path.join(model_token_pretrain,'model') # pretrained mod using custom tok
-                model = AutoModelForSequenceClassification.from_pretrained(mod,config=conf)
-                # same approach to train tokenizer:
-                # load repo tokenizer and newly trained custom tokenizer
-                # then add new tokens from custom tok to repo tok
-                # then update dimension size of mod
-                tokenizer = AutoTokenizer.from_pretrained(model_args.mod,
-                                                          use_fast=True,max_length=model_args.seq_len)
-                tokenizer_update = AutoTokenizer.from_pretrained(token_dir,
-                                                                 use_fast=True,max_length=model_args.seq_len)
-                new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
-                tokenizer.add_tokens(new_tokens)
-                print('Length of updated tokenizer: %s' % len(tokenizer))
-                dim1 = str(model.get_input_embeddings())
-                model.resize_token_embeddings(len(tokenizer))
-                dim2 = str(model.get_input_embeddings())
-                print('Resizing model embedding layer from %s to %s.' % (dim1,dim2))
-                out_dir = os.path.join(train_dir,'final_model_token_pretrain_finetune') # location to output mod, pl3
-        
-        elif sweep_args.train_method == 'pretrain':
-            
-            train_dir = os.path.join(out_dir,'pretrain') # needs a unique folder since labels/strf
-            token_dir = os.path.join(model_args.work_dir,'out','token') # labels/rfst doenst apply, so one model
-            
-            model = AutoModelForMaskedLM.from_pretrained(model_args.mod,
-                                                         #quantization_config=bnb_config,
-                                                         trust_remote_code=True,
-                                                         model_args.mod_load_in_8bit,
-                                                         attn_implementation='flash_attention_2',
-                                                         model_args.mod_torch_dtype)
-            tokenizer = AutoTokenizer.from_pretrained(model_args.mod,max_length=model_args.seq_len)
-            tokenizer.pad_token_id = tokenizer.eos_token_id
-            tokenizer.pad_token = tokenizer.eos_token
-            model.config.pad_token_id = tokenizer.pad_token_id
-            
-            if pl == 1: # pretrain with repo model
-                out_dir = os.path.join(train_dir,'model_pretrain') # loc for pretrained mod
-            if pl == 2: # pretrain with custom tokenizer
-                # obtain new tokens not in repo tokenizer then add them to repo tokenizer
-                tokenizer_update = AutoTokenizer.from_pretrained(token_dir,fast=True)
-                new_tokens = list(set(tokenizer_update.vocab.keys()) - set(tokenizer.vocab.keys()))
-                tokenizer.add_tokens(new_tokens)
-                print('Length of updated tokenizer: %s' % len(tokenizer))
+        train_dir = os.path.join(out_dir,'finetune',folder_fn) # needs a unique folder since labels/strf
 
-                # resize model embeddings to accomidate new tokens
-                dim1 = str(model.get_input_embeddings())
-                model.resize_token_embeddings(len(tokenizer))
-                dim2 = str(model.get_input_embeddings())
-                print("Resizing model embedding layer from %s to %s." % (dim1,dim2))
-                out_dir = os.path.join(train_dir,'model_token_pretrain') # loc for custom tok and pretrained mod
+        model = AutoModelForSequenceClassification.from_pretrained(model_args.mod,
+                                                                   #quantization_config=quantization_config,
+                                                                   trust_remote_code=True,
+                                                                   load_in_8bit=model_args.mod_load_in_8bit,
+                                                                   attn_implementation='flash_attention_2',
+                                                                   torch_dtype=model_args.mod_torch_dtype,
+                                                                   num_labels=model_args.num_labels)
+        tokenizer = AutoTokenizer.from_pretrained(model_args.mod,max_length=model_args.seq_len)
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        tokenizer.pad_token = tokenizer.eos_token
+        model.config.pad_token_id = tokenizer.pad_token_id
+        out_dir = os.path.join(train_dir,'final_model_finetune') # location to output mod, pl1
 
-            
-        return model, tokenizer, conf, out_dir
+        return model, tokenizer, out_dir
 
 def get_data(model_args,sweep_args,tune_args):
-    dat = read_data(os.path.join('/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/data',model_args.input_table),
-                    th=sweep_args.threshold,fr=sweep_args.fraction,exp=sweep_args.label)
+    dat = read_data(os.path.join('/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/data',
+                                 model_args.input_table),
+                    th=sweep_args.threshold,fr=sweep_args.fraction,exp=sweep_args.label,
+                   limit=120000)
 
     class_weights = None
-    if sweep_args.train_method == 'finetune':
-        if tune_args.class_weights:
+    if tune_args.class_weights:
+        if tune_args.class_weighting == 1.0:
+            print('\nCalculating class weights based on label counts.\n')
             class_weights = get_class_weights(dat['train'], model_args.num_labels)
-            print(f"Class weights:\n0={class_weights[0]}\n1={class_weights[1]}") 
+        else:
+            class_weights = torch.as_tensor([1-tune_args.class_weighting, tune_args.class_weighting])
+        print(f"Class weights:\n0={class_weights[0]}\n1={class_weights[1]}") 
 
     if tune_args.filter_keywords:
-        print('\nFiltering keywords used in expert labeling.')
+        print('\nFiltering keywords from training set used in expert labeling.')
         for i in range(len(dat['train']['text'])):
-            note = dat['train']['text'][i]
-            note = note.replace('delirium','').replace('encephalopathy','')
-            dat['train']['text'][i] = note
+                note = dat['train']['text'][i]
+                note = note.replace('delirium','').replace('encephalopathy','')
+                dat['train']['text'][i] = note
+                
+    dat['heldout_expert_filtered'] = dat['heldout_expert'] 
+    for i in range(len(dat['heldout_expert_filtered']['text'])):
+        note = dat['heldout_expert_filtered']['text'][i]
+        note = note.replace('delirium','').replace('encephalopathy','')
+        dat['heldout_expert_filtered']['text'][i] = note
 
     d_train = Dataset.from_dict(dat['train'])
 
-    if model_args.f_subset_data is not None:
-        print(f"Subsetting training data to {round(model_args.f_subset_data * 100)}% of total.")
-        d_train = d_train.train_test_split(test_size=1-model_args.f_subset_data,shuffle=True)['train'] 
+    if model_args.testing:
+        print(f"\nSubsetting training data to 5% of total.")
+        d_train = d_train.train_test_split(test_size=0.95,shuffle=True)['train'] 
 
     d_val = Dataset.from_dict(dat['val'])
 
-    if sweep_args.train_method == 'finetune':
-        d_heldout_icd = Dataset.from_dict(dat['heldout_icd'])
-        d_heldout_expert = Dataset.from_dict(dat['heldout_expert'])
-    else:
-        d_heldout_icd = d_heldout_expert = class_weights = None
+    d_heldout_icd = Dataset.from_dict(dat['heldout_icd'])
+    d_heldout_expert = Dataset.from_dict(dat['heldout_expert'])
+    d_heldout_expert_filtered = Dataset.from_dict(dat['heldout_expert_filtered'])
 
-    return d_train, d_val, d_heldout_icd, d_heldout_expert, class_weights
+    return d_train, d_val, d_heldout_icd, d_heldout_expert, d_heldout_expert_filtered, class_weights
 
 def get_cfgs(model_args, sweep_args):
     bnb_config = BitsAndBytesConfig( 
@@ -364,7 +305,7 @@ def get_cfgs(model_args, sweep_args):
         bnb_4bit_quant_type=model_args.bnb_4bit_quant_type,
         bnb_4bit_compute_dtype=model_args.quant_compute_dtype,
         bnb_4bit_use_double_quant=model_args.bnb_4bit_use_double_quant,
-        bnb_4bit_quant_storage=model_args.quant_storage_dtype,
+        bnb_4bit_quant_storage=model_args.bnb_4bit_quant_storage_dtype,
     )
 
     peft_config = LoraConfig(
@@ -375,23 +316,17 @@ def get_cfgs(model_args, sweep_args):
         target_modules=model_args.lora_target_modules,
     )
     
-    if sweep_args.train_method == 'finetune':
-        peft_config.task_type = 'SEQ_CLS'
-    elif sweep_args.train_method == 'pretrian':
-        peft_config.task_type = 'CAUSAL_LM'
+    peft_config.task_type = 'SEQ_CLS'
     
     return bnb_config, peft_config
 
 def get_folder_fn(model_args,sweep_args):
-    if sweep_args.train_method == 'finetune':   
-        folder_fn = 'fit_' + sweep_args.label
-        if sweep_args.pipeline == 'pseudo':
-            folder_fn += '_th' + th + '_fr' + fr
-        folder_fn += '_pl' + str(sweep_args.pipeline) 
-        if model_args.folder_suffix is not None:
-            folder_fn += '_' + model_args.folder_suffix 
-    else:
-        folder_fn = None
+    folder_fn = 'fit_' + sweep_args.label
+    if sweep_args.pipeline == 'pseudo':
+        folder_fn += '_th' + th + '_fr' + fr
+    folder_fn += '_pl' + str(sweep_args.pipeline) 
+    if model_args.folder_suffix is not None:
+        folder_fn += '_' + model_args.folder_suffix 
 
     return(folder_fn)
 
@@ -402,33 +337,30 @@ def main(model_args, tune_args, sweep_args):
     device, main.folder_fn = init(model_args, sweep_args)
     main.out_dir = os.path.join(model_args.work_dir,'out')
 
-    d_train, d_val, d_heldout_icd, d_heldout_expert, class_weights = get_data(model_args,sweep_args,tune_args)
+    d_train, d_val, d_heldout_icd, d_heldout_expert, d_heldout_expert_filtered, class_weights = get_data(model_args,sweep_args,tune_args)
     bnb_config, peft_config = get_cfgs(model_args, sweep_args)
-    model, tokenizer, conf, main.out_dir = get_components(sweep_args,model_args,bnb_config,main.out_dir,main.folder_fn)
+    model, tokenizer, main.out_dir = get_components(sweep_args,model_args,bnb_config,main.out_dir,main.folder_fn)
     
-    if tune_args.out_dir is not None:
-        main.out_dir = os.path.join(tune_args.out_dir,'out')
-        print(f"Overwriting default output directory to {main.out_dir}.")
-    else:   
-        main.out_dir, main.folder_fn = check_and_save_params(model_args, tune_args, sweep_args, main.out_dir, main.folder_fn)
-
     def tokenize_dataset(data):
         data['text'] = [line for line in data['text'] if len(line) > 0 and not line.isspace()]
 
         return tokenizer(data['text'],padding=tune_args.pad_max_len,truncation=True,
                          max_length=model_args.seq_len,return_special_tokens_mask=True)
 
-    if model_args.n_steps_testing is None:
-        n_steps = math.floor(len(d_train)*model_args.n_train_epochs/model_args.n_batch/model_args.n_grad_accum)
-        n_warmup = int(round(n_steps * model_args.warmup_ratio))
-        n_epochs = model_args.n_train_epochs
-        log_steps = int(round(n_steps * model_args.f_log_steps))
-        log_steps = 100 if log_steps > 100 else log_steps
-    else:
-        n_steps = model_args.n_steps_testing
+    if model_args.testing:
+        n_steps = 5
         n_warmup = 0
         n_epochs = 1
-        log_steps = round(n_steps)/2
+        log_steps = 1
+        save_strategy = 'no'
+        save_steps = 0
+    else:
+        n_steps = int(len(d_train) * model_args.n_train_epochs / model_args.n_batch / model_args.n_grad_accum)
+        n_warmup = int(n_steps * model_args.warmup_ratio)
+        n_epochs = model_args.n_train_epochs
+        log_steps = n_steps // model_args.f_log_steps
+        save_strategy = 'steps'
+        save_steps = log_steps * model_args.save_multiplier
     print(f"\nRun will be over {n_steps} training steps, {log_steps} evaluation steps, {n_warmup} warmup steps, and {n_epochs} epochs.")
 
     print('\nTokenizing training data.')
@@ -436,34 +368,24 @@ def main(model_args, tune_args, sweep_args):
     print('Tokenizing validation data.')
     d_val = d_val.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
     
-    if sweep_args.train_method == 'finetune':
-        print('Tokenizing testing data.')
-        d_heldout_icd = d_heldout_icd.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
-        d_heldout_expert = d_heldout_expert.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
 
-        if tune_args.upsample:
-            print('Upsampling training data.')
-            d_train = balance_data(d_train,cores=model_args.n_cores)
-            
-        data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-        if tune_args.group_by_len:
-            data_collator.padding = 'longest'
-        else:
-            data_collator.padding = 'max_length'
-            data_collator.max_length = model_args.seq_len
-            
-    elif sweep_args.train_method == 'pretrain':
-        data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=0.15)
-        
-    optimizer = torch.optim.AdamW(model.parameters(),lr=model_args.lr,weight_decay=model_args.w_decay)
-    scheduler = get_cosine_schedule_with_warmup(optimizer=optimizer,
-                                                num_warmup_steps=n_warmup,
-                                                num_training_steps=n_steps,
-                                                num_cycles=model_args.n_cycles,
-                                               )
-    
-    conf.hidden_dropout_prob=model_args.do_hidden
-    conf.classifier_dropout=model_args.do_class
+    print('Tokenizing testing data.')
+    d_heldout_icd = d_heldout_icd.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
+    d_heldout_expert = d_heldout_expert.map(tokenize_dataset,batched=True,num_proc=model_args.n_cores,remove_columns=['text'])
+    d_heldout_expert_filtered = d_heldout_expert_filtered.map(tokenize_dataset,batched=True,
+                                                              num_proc=model_args.n_cores,remove_columns=['text'])
+
+    if tune_args.upsample:
+        print('Upsampling training data.')
+        d_train = balance_data(d_train,cores=model_args.n_cores)
+
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    if tune_args.group_by_len:
+        data_collator.padding = 'longest'
+    else:
+        data_collator.padding = 'max_length'
+        data_collator.max_length = model_args.seq_len
+
 
     training_args = TrainingArguments(
         disable_tqdm = False,
@@ -476,24 +398,31 @@ def main(model_args, tune_args, sweep_args):
         overwrite_output_dir = True,
         logging_strategy = 'steps',
         logging_steps = log_steps, 
-        save_strategy = 'steps',
-        save_steps = log_steps * model_args.save_multiplier,
+        save_strategy = save_strategy,
+        save_steps = save_steps,
         save_total_limit = 1,
 
         evaluation_strategy = 'steps',
         eval_steps = log_steps, 
         
-        load_best_model_at_end = False,
-        
+        max_steps = n_steps if model_args.testing else -1,
+
         num_train_epochs = n_epochs,
         learning_rate = model_args.lr, 
         weight_decay = model_args.w_decay,  
         warmup_steps = n_warmup,
+        lr_scheduler_type = 'constant_with_warmup',
+        
+        load_best_model_at_end = True,
+        metric_for_best_model = 'b_accuracy',
+        greater_is_better = True,
+        label_smoothing_factor = model_args.label_smoothing,
 
-        auto_find_batch_size = False, 
         dataloader_num_workers = model_args.n_cores, 
         dataloader_persistent_workers = True,
         dataloader_pin_memory = True,
+
+        group_by_length = tune_args.group_by_len,
 
         bf16 = model_args.bf16,
 
@@ -507,26 +436,18 @@ def main(model_args, tune_args, sweep_args):
     )
     
     if model_args.n_steps_testing is None:
-        training_args.report_to = 'wandb',
+        training_args.report_to = 'wandb'
         training_args.run_name = main.folder_fn
+        
+    print(f"\nTraining groups: 0={d_train['labels'].count(0)}, 1={d_train['labels'].count(1)}")
+    print(f"Validation groups: 0={d_val['labels'].count(0)}, 1={d_val['labels'].count(1)}")
+    print(f"Heldout icd groups: 0={d_heldout_icd['labels'].count(0)}, 1={d_heldout_icd['labels'].count(1)}")
+    print(f"Heldout expert groups: 0={d_heldout_expert['labels'].count(0)}, 1={d_heldout_expert['labels'].count(1)}")
 
-    if sweep_args.train_method == 'finetune':
-        training_args.load_best_model_at_end = True
-        training_args.metric_for_best_model = 'b_accuracy'
-        training_args.greater_is_better = True
-        training_args.label_smoothing_factor = model_args.label_smoothing
-        
-        print(f"\nTraining groups: 0={d_train['labels'].count(0)}, 1={d_train['labels'].count(1)}")
-        print(f"Validation groups: 0={d_val['labels'].count(0)}, 1={d_val['labels'].count(1)}")
-        print(f"Heldout icd groups: 0={d_heldout_icd['labels'].count(0)}, 1={d_heldout_icd['labels'].count(1)}")
-        print(f"Heldout expert groups: 0={d_heldout_expert['labels'].count(0)}, 1={d_heldout_expert['labels'].count(1)}")
-        
-    training_args.group_by_length = tune_args.group_by_len
-    
     print('\nTraining args:')
     print_vars(vars(training_args))
           
-    if tune_args.class_weights and sweep_args.train_method == 'finetune':
+    if tune_args.class_weights:
         print('\nUsing weighted loss function.')
         class cTrainer(wSFTTrainer):
             pass
@@ -542,7 +463,9 @@ def main(model_args, tune_args, sweep_args):
         eval_dataset = d_val,
         peft_config=peft_config,
         tokenizer = tokenizer,
-        optimizers = (optimizer,scheduler),
+        compute_metrics = compute_metrics,
+        data_collator = data_collator,
+        callbacks = [EarlyStoppingCallback(early_stopping_patience=5,early_stopping_threshold=0.005)],
     )
     
     trainer.accelerator.print(f"Model: {trainer.model}")
@@ -553,22 +476,12 @@ def main(model_args, tune_args, sweep_args):
 
         fsdp_plugin = trainer.accelerator.state.fsdp_plugin
         fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
-    
-    if sweep_args.train_method == 'finetune':
-        trainer.compute_metrics = compute_metrics
-        trainer.callbacks = [EarlyStoppingCallback(early_stopping_patience=15,early_stopping_threshold=0.005)]
-        if tune_args.use_collator:
-            trainer.data_collator = data_collator
-
-        # create headers for eval metric results file
-        with open(os.path.join(main.out_dir,'eval_results.dat'), 'w') as f:
-            print('acc\tb_acc\tf1\tauc\tprec\trec\tbatch_len\tpred_pod\ttrue_pos\n',file=f)
-    elif sweep_args.train_method == 'pretrain':
-        trainer.data_collator = data_collator
+   
+    with open(os.path.join(main.out_dir,'eval_results.dat'), 'w') as f:
+        print('acc\tb_acc\tf1\tauc\tprec\trec\tbatch_len\tpred_pod\ttrue_pos\n',file=f)
             
     trainer.train()
 
-    model.save_pretrained(os.path.join(main.out_dir,'model'))
     trainer.save_model(os.path.join(main.out_dir,'model_trainer')) 
 
     process_log_history(sweep_args,trainer.state.log_history,main.out_dir)
@@ -581,5 +494,8 @@ def main(model_args, tune_args, sweep_args):
 if __name__ == '__main__':
     parser = HfArgumentParser((ModelArgs,TuneArgs,SweepArgs))
     model_args, tune_args, sweep_args = parser.parse_args_into_dataclasses()
+    
+    os.environ["WANDB_PROJECT"]= 'lf_llama'                     
+    os.environ["WANDB_LOG_MODEL"] = 'false'
 
     main(model_args, tune_args, sweep_args)
