@@ -75,13 +75,30 @@ fracs <- c(1,0.75,0.5,0.35,0.2)
 # create parameter sweep table
 # not doing ns adapt anymore since prior runs didnt make a difference
 set.seed(342)
-combs <- crossing(thresholds,ns_adapt,seeds,fracs) %>% 
+combs_a <- crossing(thresholds,ns_adapt,seeds,fracs) %>% 
   filter(!(fracs < 1 & thresholds != 0.7)) %>%
   group_by(fracs) %>%
   mutate(fracs_seed=sample(1:99999,1)) %>%
   ungroup() %>%
   arrange(desc(fracs),thresholds) %>%
   mutate(b_acc=NA)
+
+set.seed(342)
+combs_b <- crossing(thresholds,ns_adapt,seeds,fracs) %>% 
+  filter(!(fracs < 1 & thresholds != 0.9)) %>%
+  group_by(fracs) %>%
+  mutate(fracs_seed=sample(1:99999,1)) %>%
+  ungroup() %>%
+  arrange(desc(fracs),thresholds) %>%
+  mutate(b_acc=NA) %>% 
+  filter(thresholds == 0.9,
+         fracs != 1)
+
+combs <- combs_a %>%
+  filter(thresholds != 0.9) %>%
+  bind_rows(combs_b)
+
+combs <- combs_b
 
 cat(glue('Running self-training with {all_cores} ',
          'cores for {nrow(combs)} trials.\n\n'))
@@ -90,9 +107,9 @@ t_total_start <- Sys.time()
 
 out <- foreach(i=1:nrow(combs),.combine='c',.verbose=TRUE,
                .errorhandling='stop',
-               .export=c('params','tree','all_cores'),
+               .export=c('params','trees','all_cores'),
                .packages=c('tidymodels','tidyverse','ranger','glue',
-                           'probably','discrim','rsample')) %do% {
+                           'probably','discrim','rsample')) %dopar% {
                  
                              
                  thres <- combs$thresholds[i]
@@ -377,5 +394,13 @@ cat(glue('All iterations complete in ',
          '{round(difftime(t_total_end,t_total_start,units="mins"),2)} ',
          'minutes, saving results.\n\n'))
 
-write_rds(list(combs=combs,out=out,time=c(t_total_start,t_total_end)),
+# pseudos <- read_rds(file.path(path,
+#                               'data_out','10_labels_rfst_count_del_full.rds'))
+# pseudos$combs <- pseudos$combs %>%
+#   bind_rows(combs) 
+# pseudos$out <- c(pseudos$out,out)
+# pseudos$time <- pseudos$time[2] - pseudos$time[1] + t_total_end-t_total_start
+# write_rds(pseudos,file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))
+
+write_rds(list(combs=combs,out=out,time=t_total_end-t_total_start),
           file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))
