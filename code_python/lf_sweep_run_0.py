@@ -6,7 +6,7 @@ import pandas as pd
 from lf_functions import sigfigs, read_data
 
 
-def sweep(n_epoch = 0.4, run):
+def sweep(run, n_epoch = 0.4):
     
     script = "lf_train.py"  
     work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
@@ -14,20 +14,13 @@ def sweep(n_epoch = 0.4, run):
     label = 'pseudo'
     fr = 100
 
-    tune_grid = {'filter_keywords': [False],
-                 #'filter_keywords': [True,False],
-                 #'th': [70,80,90],
-                 'th': [80,90],
+    tune_grid = {'filter_keywords': [True,False],
+                 'th': [70,80,90],
                  'lr': [2e-6,8e-6],
-                 #'lr': [2e-6,8e-6,2e-5],
-                 #'w_decay': [0.1,0.01,.001],
-                 'w_decay': [0.01],
-                 #'n_batch': [8,16,32,64],
+                 'w_decay': [0.1], #[0.1,0.01],
                  'n_batch': [8,16,32],
-                 #'lab_smooth': [0.3,0.15,0.0],
                  'lab_smooth': [0.0],
-                 #'class_weighting': [0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99,1.0],
-                 'class_weighting': [0.05,0.1,0.25,0.75],
+                 'class_weighting': [0.05,0.25,0.5,0.75,0.95],
                  }
 
     all_combinations = list(itertools.product(*tune_grid.values()))
@@ -78,7 +71,7 @@ def sweep(n_epoch = 0.4, run):
             "python", script,
             "--sweep", "True",
             "--testing", "False",
-            "--seed", "14231",
+            "--seed", "215",
             "--train_method", "finetune",
             "--label", label,
             "--overwrite_prompt", "False",

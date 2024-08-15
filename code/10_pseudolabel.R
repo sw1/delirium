@@ -98,7 +98,7 @@ combs <- combs_a %>%
   filter(thresholds != 0.9) %>%
   bind_rows(combs_b)
 
-combs <- combs_b
+# combs <- combs_b
 
 cat(glue('Running self-training with {all_cores} ',
          'cores for {nrow(combs)} trials.\n\n'))
@@ -401,6 +401,36 @@ cat(glue('All iterations complete in ',
 # pseudos$out <- c(pseudos$out,out)
 # pseudos$time <- pseudos$time[2] - pseudos$time[1] + t_total_end-t_total_start
 # write_rds(pseudos,file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))
+# 
+# write_rds(list(combs=combs,out=out,time=t_total_end-t_total_start),
+#           file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))
 
-write_rds(list(combs=combs,out=out,time=t_total_end-t_total_start),
+out_paths <- list.files(file.path(path,'data_tmp'),full.names=TRUE,
+                        pattern='labels_rfst_th\\d+_seed\\d+_frac\\d+.csv.gz')
+
+params <- tibble()
+out <- list()
+for (p in out_paths){
+  o <- read_csv(p)
+  out <- c(out,list(o))
+  
+  param <- str_extract(p,'th\\d+_seed\\d+_frac\\d+') %>%
+    str_replace_all('th|seed|frac','') %>%
+    str_split('_') %>%
+    unlist() %>%
+    as.numeric() %>%
+    t() %>%
+    as_tibble() %>%
+    rename('thresholds'=1,'seeds'=2,'fracs'=3) 
+  
+  params <- params %>%
+    bind_rows(param)
+}
+
+combs <- params %>%
+  mutate(thresholds=thresholds/100,
+         fracs=fracs/100) %>%
+  left_join(combs,by=c('thresholds','seeds','fracs'))
+
+write_rds(list(combs=combs,out=out),
           file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))

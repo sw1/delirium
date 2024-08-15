@@ -6,47 +6,63 @@ import pandas as pd
 from lf_functions import sigfigs, read_data
 
 
-def run_from_cp(n_epoch = 1, reduction_factor = 4):
+def run_from_cp(n_epoch = 3):
     
     script = "lf_train.py"  
     work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
     sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
-
-    cw = [0.25,0.5,0.75]
-    fkw = [True,False]
-    ls = [0]
-    nb = [8,16]
-    lr = [0.000008]
-    th = [90]
-    wd = [0.1]
-    lab = ['pseudo','full','only']
     
-    combinations = list(itertools.product(lab,cw,fkw,ls,nb,lr,th,wd))
-    df = pd.DataFrame(combinations,
-                      columns=['label','cw', 'filter_keywords', 'lab_smooth', 'eff_n_batch', 'lr', 'th', 'w_decay'])
-    
-    out_dir = os.path.join(work_dir,'longformer','out','sweep','run_cw_bal')
-    
-    for i in range(len(df)):
+    tune_grid = {'label': ['pseudo','only','full'],
+                 'pl': [1,2,3],
+                 'fr': [100,75,50,35,20],
+                 'filter_keywords': [True, False],
+                 'th': [90],
+                 'lr': [2e-6],
+                 'w_decay': [0.1], 
+                 'n_batch': [16],
+                 'lab_smooth': [0.0],
+                 'cw': [0.05,0.25,0.5,0.75,0.95,1.0],
+             }
 
-        label = df['label'][i]
-        filter_keywords = df['filter_keywords'][i]
-        lr = df['lr'][i]
-        w_decay = df['w_decay'][i]
-        n_batch = df['eff_n_batch'][i]
-        lab_smooth = df['lab_smooth'][i]
-        class_weighting = df['cw'][i]
-        th = df['th'][i]
+    all_combinations = list(itertools.product(*tune_grid.values()))
+    tune_grid = pd.DataFrame(all_combinations, columns=tune_grid.keys())
 
-        folder_name = (label +
-                       '_fkw' + str(int(filter_keywords)) +
+    tune_grid = tune_grid[~((tune_grid['label'] == 'only') & (tune_grid['fr'] != 100))]
+    tune_grid = tune_grid[~((tune_grid['label'].isin(['only', 'full'])) & (tune_grid['pl'] != 1))]
+    tune_grid = tune_grid[~((tune_grid['label'].isin(['pseudo', 'full'])) & (tune_grid['filter_keywords'] == False) & (tune_grid['fr'] != 100))]
+    tune_grid = tune_grid[~((tune_grid['label'] == 'pseudo') & (tune_grid['cw'] > 0.5))]
+    tune_grid = tune_grid[~((tune_grid['label'] == 'pseudo') & (tune_grid['filter_keywords'] == False) & (tune_grid['pl'] != 1))]
+    tune_grid = tune_grid[~((tune_grid['label'].isin(['pseudo', 'full'])) & (tune_grid['filter_keywords'] == False) & (tune_grid['fr'] != 100))]
+    tune_grid = tune_grid[~((tune_grid['label'].isin(['pseudo', 'full'])) & (tune_grid['pl'] != 1) & (tune_grid['fr'] != 100))]
+    tune_grid = tune_grid[~((tune_grid['fr'] == 20))]
+
+    tune_grid = tune_grid.sample(frac=1).reset_index(drop=True)
+    
+    for i in range(len(tune_grid)):
+
+        out_dir = os.path.join(work_dir,'longformer','out','sweep','run_cw_final')
+
+        label = tune_grid['label'][i]
+        pl = tune_grid['pl'][i]
+        fr = tune_grid['fr'][i]
+        filter_keywords = tune_grid['filter_keywords'][i]
+        th = tune_grid['th'][i]
+        lr = tune_grid['lr'][i]
+        w_decay = tune_grid['w_decay'][i]
+        n_batch = tune_grid['n_batch'][i]
+        lab_smooth = tune_grid['lab_smooth'][i]
+        class_weighting = tune_grid['cw'][i]
+
+        folder_name = ('fkw' + str(int(filter_keywords)) +
                        '_th' + str(th) +
+                       '_fr' + str(fr) + 
+                       '_pl' + str(pl) +
                        '_lr' + sigfigs(lr,1) +
                        '_wd' + sigfigs(w_decay,1) + 
                        '_nb' + str(n_batch) + 
                        '_ls' + sigfigs(lab_smooth,1) +
-                       '_cw' + str(int(class_weighting * 100))
-        )
+                       '_cw' + str(int(class_weighting * 100)) +
+                       '_lab' + label)
 
         try:
             os.makedirs(os.path.join(out_dir,folder_name))
@@ -55,7 +71,7 @@ def run_from_cp(n_epoch = 1, reduction_factor = 4):
             continue
 
         n_notes = len(read_data(os.path.join(work_dir,'longformer','data','tbl.csv.gz'),
-                            exp=label,th=th,fr=100)['train']['text'])
+                            exp=label,th=th,fr=fr)['train']['text'])
 
         n_grad = 2 if n_batch == 64 else 1
         n_batch = 32 if n_batch == 64 else n_batch
@@ -68,12 +84,13 @@ def run_from_cp(n_epoch = 1, reduction_factor = 4):
             "python", script,
             "--sweep", "True",
             "--testing", "False",
-            "--seed", "14231",
+            "--seed", "215",
             "--train_method", "finetune",
             "--label", label,
             "--overwrite_prompt", "False",
             "--threshold", str(th),
-            "--pipeline", "1",
+            "--fraction", str(fr),
+            "--pipeline", str(pl),
             "--seq_len", "4096",
             "--log_steps", str(log_steps),
             "--n_grad_accum", str(n_grad),
@@ -102,7 +119,7 @@ def run_from_cp(n_epoch = 1, reduction_factor = 4):
             "--out_dir", out_dir,
             "--work_dir", os.path.join(work_dir,"longformer"),
             "--folder_fn", folder_name,
-            "--wandb_pn", "sweep_run_cw_bal",
+            "--wandb_pn", "sweep_run_cw_final",
             "--final_sweep", "False",
             "--early_stopping","True"
         ]
@@ -110,4 +127,4 @@ def run_from_cp(n_epoch = 1, reduction_factor = 4):
         print(f"\nRunning trial {folder_name}.")
         subprocess.run(command)
 
-run_from_cp(n_epoch=4)
+run_from_cp(n_epoch=3)

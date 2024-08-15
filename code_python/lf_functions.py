@@ -49,7 +49,7 @@ def read_data(fn,exp,th=None,fr=None,limit=None):
     idx_set = header.index('set')
 
     if exp == 'full':
-        idx_label = header.index('label_fullexpert')
+        idx_label = header.index('label_fullexpert_fr' + str(fr))
     elif exp == 'only':
         idx_label = header.index('label')
     elif exp == 'pseudo':
@@ -353,29 +353,36 @@ def process_log_history(sweep_args,log_history,out_dir):
         plt.legend()
         plt.savefig(os.path.join(out_dir,'figure3.png'))
         
-def final_preds(out_dir, args=None, **kwargs):
+def final_preds(trainer, out_dir=None, args=None, **kwargs):
     print('\nFinal predictions.')
 
     test_results = {}
+                
+    if out_dir is not None:
+        with open(os.path.join(out_dir,'test_results.dat'), 'w') as f:
+            if args is not None:
+                print('\nRun args:')
+                print_vars(args, file=f)
 
-    with open(os.path.join(out_dir,'test_results.dat'), 'w') as f:
-        if args is not None:
-            print('\nRun args:')
-            print_vars(args, file=f)
-            
+            for y_name, y_x in kwargs.items():
+                y_hat = trainer.predict(y_x)
+                test_results[y_name] = y_hat
+
+                print(f"\nResults for table {y_name}", file=f)
+                print(f"\nResults for table {y_name}.")
+                for k, v in y_hat[2].items():
+                    print(f"{k}: {v}", file=f)
+                    print(f"{k}: {v}")
+                print('\n', file=f)
+
+        with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:
+            pickle.dump(test_results, f)
+    else:
         for y_name, y_x in kwargs.items():
             y_hat = trainer.predict(y_x)
-            test_results[y_name] = y_hat
-
-            print(f"\nResults for table {y_name}", file=f)
-            print("\nResults for table {y_name}.")
+            print(f"\nResults for table {y_name}.")
             for k, v in y_hat[2].items():
-                print(f"{k}: {v}", file=f)
                 print(f"{k}: {v}")
-            print('\n', file=f)
-
-    with open(os.path.join(out_dir,'test_results.pkl'), 'wb') as f:
-        pickle.dump(test_results, f)
     
 def sigfigs(number, digits=2):
     format_string = "{:." + str(digits) + "e}"

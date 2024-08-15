@@ -6,19 +6,24 @@ import pandas as pd
 from lf_functions import sigfigs, read_data
 
 
-def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
+def run_from_cp(run, n_epoch = 1, reduction_factor = 4, sort_by='b_acc'):
     
     script = "lf_train.py"  
     work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
     sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
-    
+
     label = 'pseudo'
     fr = 100
 
-    df = pd.read_csv(os.path.join(sweep_path,'run_cw_' + str(run-1) + '.csv')).sort_values(by='score',ascending=False)   
-    top_n = len(df) // reduction_factor
+    df = pd.read_csv(os.path.join(sweep_path,'run_cw_' + str(run-1) + '.csv')).sort_values(by=sort_by,ascending=False)   
+    top_n = len(df) // (reduction_factor * 2)
 
-    for i in range(top_n):
+    df_true = df[df['filter_keywords'] == True].head(top_n)
+    df_false = df[df['filter_keywords'] == False].head(top_n)
+    df = pd.concat([df_true, df_false])
+    df.reset_index(drop=True, inplace=True)
+
+    for i in range(len(df)):
 
         out_dir = os.path.join(work_dir,'longformer','out','sweep','run_cw_' + str(run))
 
@@ -75,7 +80,7 @@ def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
             "--sweep", "True",
             "--testing", "False",
             "--load_cp", path_cp,
-            "--seed", "14231",
+            "--seed", "215",
             "--train_method", "finetune",
             "--label", label,
             "--overwrite_prompt", "False",
@@ -112,10 +117,10 @@ def run_from_cp(run, n_epoch = 1, reduction_factor = 4):
             "--work_dir", os.path.join(work_dir,"longformer"),
             "--folder_fn", folder_name,
             "--wandb_pn", "sweep_run_cw_" + str(run),
-            "--final_sweep", "True"
+            "--final_sweep", "False"
         ]
 
         print(f"\nRunning trial {folder_name}.")
         subprocess.run(command)
 
-run_from_cp(run=3,n_epoch=4,reduction_factor=3)
+run_from_cp(run=1,n_epoch=1,reduction_factor=4,sort_by='b_acc')

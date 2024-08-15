@@ -3,19 +3,20 @@ import pandas as pd
 import math
 import statsmodels.api as sm
 import argparse
+import shutil
 
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_colwidth',75)
 
-def stat_summary(run,y):
+def stat_summary(run,y='b_acc'):
     sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
-    run = 'run_' + str(run)
+    run = 'run_cw_' + str(run)
     
     df = pd.read_csv(os.path.join(sweep_path,run + '.csv'))
     df['intercept'] = 1
     df['filter_keywords'] = df['filter_keywords'].astype(int)
 
-    predictors = ['filter_keywords', 'th', 'lr', 'w_decay', 'eff_n_batch', 'lab_smooth', 'cw']
+    predictors = ['filter_keywords', 'th', 'lr', 'w_decay', 'eff_n_batch', 'cw']
     df[predictors] = df[predictors] - df[predictors].mean()
 
     df['th_cw'] = df['th'] * df['cw']
@@ -60,8 +61,22 @@ def merge_results(run,rf=1,stat='b_acc',stat_summary=False):
         print(df)
         print(f"\n{len(df)} total trials.\n")
         
-    if stat_summary:
-        stat_summary(run,y=stat)
+def clean_results(run, rm=False):
+    sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
+    run = 'run_cw_' + str(run)
+    path = os.path.join(sweep_path,run)
+    
+    n_incomplete = 0
+    n_complete = 0
+    for trial in os.listdir(path):
+        if not os.path.exists(os.path.join(path,trial,"eval_res.csv")):
+            if rm:
+                shutil.rmtree(os.path.join(path,trial))
+            n_incomplete += 1
+        else:
+            n_complete += 1
+            
+    print(f"{n_complete} complete runs | {n_incomplete} incomplete runs.\n")
         
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -69,6 +84,10 @@ if __name__ == "__main__":
     parser.add_argument('--rf', type=int, required=False, default=1)
     parser.add_argument('--stat', type=str, required=False, default='b_acc')
     parser.add_argument('--stat_summary', type=bool, required=False, default=False)
+    parser.add_argument('--y', type=str, required=False, default='b_acc')
+    parser.add_argument('--rm', type=bool, required=False, default=False)
     args = parser.parse_args()
 
     merge_results(args.run, args.rf, args.stat, args.stat_summary)
+    stat_summary(args.run)
+    clean_results(args.run,args.rm)

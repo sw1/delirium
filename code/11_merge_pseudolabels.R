@@ -103,5 +103,34 @@ tbl <- tbl %>%
   left_join(labs,by='id') %>%
   mutate(across(everything(),~replace_na(.x, -1)))
 
+combs <- read_rds(
+  file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))$combs %>%
+  select(fracs,fracs_seed) %>%
+  filter(!is.na(fracs_seed),
+         fracs != 1) %>%
+  distinct() 
+
+exp_train_labs <- tbl %>%
+  filter(set == 'train',
+         label != -1) %>%
+  select(id,label)
+
 tbl <- tbl %>%
-  write_csv(file.path(path,'to_python','tbl.csv.gz'))
+  rename(label_fullexpert_fr100=label_fullexpert)
+
+for (i in 1:nrow(combs)){
+  set.seed(combs$fracs_seed[i])
+  ids <- exp_train_labs %>%
+    group_by(label) %>%
+    sample_frac(combs$fracs[i]) %>%
+    ungroup() %>%
+    pull(id)
+  
+  tbl <- tbl %>%
+    mutate(!!glue('label_fullexpert_fr{combs$fracs[i] * 100}') := case_when(
+      id %in% ids ~ label,
+      set != 'train' ~ label,
+      TRUE ~ 0))
+}
+  
+tbl %>% write_csv(file.path(path,'to_python','tbl.csv.gz'))

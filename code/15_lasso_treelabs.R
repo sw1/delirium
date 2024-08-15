@@ -117,7 +117,6 @@ for (i in 1:nrow(tbl_res)){
   # 
   # autoplot(ures)
 
-  
   lambda <- res %>% 
     select_best(metric='bal_accuracy') %>%
     pull(penalty)
@@ -132,23 +131,32 @@ for (i in 1:nrow(tbl_res)){
   
   if (tbl_res$w[i] != 0) wf <- wf %>% add_case_weights(w) 
     
-  cal <- wf %>%
-    fit_resamples(vfold_cv(x_train %>%
-                             mutate(y=as.factor(if_else(
-                               y == 1,'pos','neg'))),
-                           strata=y,v=all_cores),
-                  metrics=metric_set(roc_auc,brier_class),
-                  control=control_resamples(save_pred=TRUE)) %>%
-    cal_estimate_logistic()
-  
   y_hat <- wf %>%
     fit(data=x_train %>%
-          mutate(y=as.factor(if_else(y == 1,'pos','neg')))) %>%
+                   mutate(y=as.factor(if_else(y == 1,'pos','neg')))) %>%
     augment(new_data=x_test %>%
-              mutate(y=as.factor(if_else(y == 1,'pos','neg')))) %>%
-    cal_apply(cal,pred_class=.pred_class) %>%
-    select(pred_1=.pred_pos)
+              mutate(y=as.factor(if_else(y == 1,'pos','neg'))))
   
+  cal <- try({
+    wf %>%
+      fit_resamples(vfold_cv(x_train %>%
+                               mutate(y=as.factor(if_else(
+                                 y == 1,'pos','neg'))),
+                             strata=y,v=all_cores),
+                    metrics=metric_set(roc_auc,brier_class),
+                    control=control_resamples(save_pred=TRUE)) %>%
+      cal_estimate_logistic()
+  },silent=TRUE)
+  
+  if (inherits(cal, 'try-error')){
+    y_hat <- y_hat %>%
+      select(pred_1=.pred_pos)
+  }else{
+    y_hat <- y_hat %>%
+      cal_apply(cal,pred_class=.pred_class) %>%
+      select(pred_1=.pred_pos)
+  }
+
   tbl_yhat <- tibble(id=y_test$id,
                      pred=if_else(y_hat[,1] > 0.5,1,0)) %>%
     mutate(pred=factor(pred,levels=0:1)) %>%
