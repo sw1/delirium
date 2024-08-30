@@ -59,6 +59,7 @@ class SweepArgs:
     Arguements for sweeping through Longformer params.
     """
     
+    wandb_disable: str = field(default=False)
     train_method: str = field(default='finetune')
     threshold: Optional[int] = field(default=70)
     fraction: Optional[int] = field(default=100 )
@@ -117,6 +118,7 @@ class ModelArgs:
     save_multiplier: Optional[int] = field(default=2)
     f_subset_data: Optional[float] = field(default=None)
     log_steps: Optional[int] = field(default=None)
+    full_determinism: Optional[bool] = field(default=True)
 
 @dataclass
 class TuneArgs:
@@ -227,9 +229,11 @@ def set_determinism(model_args):
     torch.cuda.manual_seed_all(model_args.seed)
     np.random.seed(model_args.seed)
     set_seed(model_args.seed)
-    enable_full_determinism(model_args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    
+    if model_args.full_determinism:
+        enable_full_determinism(model_args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 def update_tokenizer(tokenizer,model,token_dir):
     tokenizer_update = AutoTokenizer.from_pretrained(token_dir,fast=True)
@@ -555,7 +559,7 @@ def main(model_args, tune_args, sweep_args):
         training_args.num_train_epochs =  model_args.n_train_epochs
         training_args.warmup_steps = 0
             
-    if not model_args.testing:
+    if not model_args.testing and not sweep_args.wandb_disable:
         training_args.report_to = 'wandb',
         training_args.run_name = main.folder_fn
         
@@ -636,7 +640,6 @@ def main(model_args, tune_args, sweep_args):
             trainer.data_collator = data_collator            
          
         if tune_args.early_stopping:
-            #trainer.callbacks = [EarlyStoppingCallback(early_stopping_patience=5,early_stopping_threshold=0.005)]
             trainer.callbacks = [EarlyStoppingCallback(early_stopping_patience=10,early_stopping_threshold=0.01)]
             
         trainer.train()
@@ -706,12 +709,12 @@ if __name__ == '__main__':
     os.environ['WORLD_SIZE'] = '1'
     os.environ['MASTER_ADDR'] = 'localhost'
     
-    if sweep_args.wandb_pn is not None:
-        os.environ["WANDB_PROJECT"]= sweep_args.wandb_pn
-    else:
-        os.environ["WANDB_PROJECT"]= 'lf_' + sweep_args.train_method
-                         
-    os.environ["WANDB_LOG_MODEL"] = 'false'
+    if not sweep_args.wandb_disable:
+        if sweep_args.wandb_pn is not None:
+            os.environ["WANDB_PROJECT"]= sweep_args.wandb_pn
+        else:
+            os.environ["WANDB_PROJECT"]= 'lf_' + sweep_args.train_method              
+        os.environ["WANDB_LOG_MODEL"] = 'false'
     
     logging.getLogger('transformers').setLevel(logging.ERROR)
     
@@ -727,7 +730,7 @@ if __name__ == '__main__':
         gc.collect()
         torch.cuda.empty_cache()
     
-    if model_args.testing:
+    if model_args.testing or sweep_args.wandb_disable:
         os.environ['WANDB_DISABLED'] = 'true'
     
     set_determinism(model_args)

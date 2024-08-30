@@ -117,43 +117,52 @@ def compute_metrics(eval_pred):
             'prop_diff': prop_diff, 'score': score}
 
 def chunk_sample(sample, chunk_size=8192):
-    tokens = sample['input_ids']
-    label = sample['labels']
     chunks = []
     
     # Calculate dynamic overlap
-    num_chunks = (len(tokens) + chunk_size - 1) // chunk_size
-    overlap = max(1, (num_chunks * chunk_size - len(tokens)) // (num_chunks - 1))
+    num_chunks = (len(sample['input_ids']) + chunk_size - 1) // chunk_size
     
     start = 0
-    while start + chunk_size <= len(tokens):
-        chunks.append({
-            'input_ids': tokens[start:start + chunk_size],
-            'labels': label
-        })
-        start += chunk_size - overlap
-    
+    if num_chunks > 1:
+        overlap = max(1, (num_chunks * chunk_size - len(sample['input_ids'])) // (num_chunks - 1))
+        while start + chunk_size <= len(sample['input_ids']):
+            chunks.append({
+                'id': sample['id'],
+                'labels': sample['labels'],
+                'input_ids': sample['input_ids'][start:start + chunk_size],
+                'attention_mask': sample['attention_mask'][start:start + chunk_size],
+                'special_tokens_mask': sample['special_tokens_mask'][start:start + chunk_size],
+            })
+            start += chunk_size - overlap
+        
     # Handle the last chunk if it doesn't fit perfectly
-    if start < len(tokens):
+    if start < len(sample['input_ids']):
         chunks.append({
-            'input_ids': tokens[-chunk_size:],
-            'labels': label
+            'id': sample['id'],
+            'labels': sample['labels'],
+            'input_ids': sample['input_ids'][-chunk_size:],
+            'attention_mask': sample['attention_mask'][-chunk_size:],
+            'special_tokens_mask': sample['special_tokens_mask'][-chunk_size:],
         })
     
     return chunks
 
 def chunk_dataset(dataset, chunk_size=8192):
-    new_dataset = {'input_ids': [], 'labels': []}
+    new_dataset = {'id': [], 'labels': [], 'input_ids': [], 'attention_mask': [], 'special_tokens_mask': []}
     
     for sample in dataset:
         chunks = chunk_sample(sample, chunk_size)
         for chunk in chunks:
-            new_dataset['input_ids'].append(chunk['input_ids'])
+            new_dataset['id'].append(chunk['id'])
             new_dataset['labels'].append(chunk['labels'])
-    
+            new_dataset['input_ids'].append(chunk['input_ids'])
+            new_dataset['attention_mask'].append(chunk['attention_mask'])
+            new_dataset['special_tokens_mask'].append(chunk['special_tokens_mask'])
+            
     return Dataset.from_dict(new_dataset)
 
-class_weighting = 0.5
+chunk_notes = True
+class_weighting = 0.05
 seq_len = 8192 
 n_train_epochs = 2
 n_eff_batch = 16
@@ -197,7 +206,8 @@ folder_name = ('fkw' + str(int(filter_keywords)) +
                '_nb' + str(n_eff_batch) + 
                '_ls' + sigfigs(0.0,1) +
                '_cw' + str(int(class_weighting * 100)) +
-               '_lab' + lab)
+               '_lab' + lab +
+               '_chunk' + str(int(chunk_notes))) 
 
 work_dir = '/shared/anesthesia/wolosomething/delirium/cleanrun_01/llama'
 out_dir = os.path.join(work_dir,'out',folder_name)
@@ -281,11 +291,24 @@ model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentran
 
 model = get_peft_model(model, peft_config)
 
-def tokenize_dataset(data):
-    data['text'] = [line for line in data['text'] if len(line) > 0 and not line.isspace()]
+if chunk_notes:
+    def tokenize_dataset(data):
+        data['text'] = [line for line in data['text'] if len(line) > 0 and not line.isspace()]
 
-    return tokenizer(data['text'],padding=False,truncation=True,
-                     max_length=seq_len,return_special_tokens_mask=True)
+        return tokenizer(data['text'],padding=False,truncation=False,
+                         max_length=seq_len,return_special_tokens_mask=True)
+else:
+    def tokenize_dataset(data):
+        data['text'] = [line for line in data['text'] if len(line) > 0 and not line.isspace()]
+
+        return tokenizer(data['text'],padding=False,truncation=True,
+                         max_length=seq_len,return_special_tokens_mask=True)    
+
+print('\nTokenizing data.')
+dataset = dataset.map(tokenize_dataset,batched=True,num_proc=16,remove_columns=['text'])
+
+if chunk_notes:
+    dataset = DatasetDict({split: chunk_dataset(dataset[split],chunk_size=seq_len) for split in dataset})
 
 n_steps = int(len(dataset['train']) * n_train_epochs / n_batch // n_grad_accum)
 n_warmup = int(n_steps * 0.1 // n_train_epochs)
@@ -294,19 +317,13 @@ log_steps = int(n_steps // num_evals)
 save_strategy = 'steps'
 save_steps = log_steps 
 print(f"\nRun will be over {n_steps} training steps, {log_steps} evaluation steps, {n_warmup} warmup steps, and {n_epochs} epochs.")
-
-print('\nTokenizing data.')
-dataset = dataset.map(tokenize_dataset,batched=True,num_proc=16,remove_columns=['text'])
-
-
-#chunked_dataset = DatasetDict({
-#    split: chunk_dataset(dataset[split]) for split in dataset
-#})
-
-
+    
 dataset.set_format('torch')
 
-data_collator = DataCollatorWithPadding(tokenizer=tokenizer,padding='longest')
+if chunk_notes:
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer,padding='max_length',max_length=seq_len)
+else:
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer,padding='longest')
 
 print('Loading training args.')
 training_args = TrainingArguments(
@@ -357,6 +374,9 @@ training_args = TrainingArguments(
     per_device_train_batch_size = n_batch, 
     per_device_eval_batch_size = n_batch, 
 )
+
+if chunk_notes:
+    training_args.group_by_length = False
        
 print('\nTraining args:')
 print_vars(vars(training_args))

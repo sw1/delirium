@@ -8,6 +8,8 @@ from lf_functions import sigfigs, read_data
 
 def run_from_cp(n_epoch = 3):
     
+    full_determ = False # changed this when sweeping through smaller thresholds, switch back to True for main models
+    
     script = "lf_train.py"  
     work_dir = "/shared/anesthesia/wolosomething/delirium/cleanrun_01"  
     sweep_path = "/shared/anesthesia/wolosomething/delirium/cleanrun_01/longformer/out/sweep"
@@ -29,14 +31,53 @@ def run_from_cp(n_epoch = 3):
 
     tune_grid = tune_grid[~((tune_grid['label'] == 'only') & (tune_grid['fr'] != 100))]
     tune_grid = tune_grid[~((tune_grid['label'].isin(['only', 'full'])) & (tune_grid['pl'] != 1))]
-    tune_grid = tune_grid[~((tune_grid['label'].isin(['pseudo', 'full'])) & (tune_grid['filter_keywords'] == False) & (tune_grid['fr'] != 100))]
+    tune_grid = tune_grid[~((tune_grid['label'] == 'pseudo') & (tune_grid['filter_keywords'] == False) & (tune_grid['fr'] != 100))]
     tune_grid = tune_grid[~((tune_grid['label'] == 'pseudo') & (tune_grid['cw'] > 0.5))]
     tune_grid = tune_grid[~((tune_grid['label'] == 'pseudo') & (tune_grid['filter_keywords'] == False) & (tune_grid['pl'] != 1))]
-    tune_grid = tune_grid[~((tune_grid['label'].isin(['pseudo', 'full'])) & (tune_grid['filter_keywords'] == False) & (tune_grid['fr'] != 100))]
+    tune_grid = tune_grid[~((tune_grid['label'] == 'pseudo') & (tune_grid['filter_keywords'] == False) & (tune_grid['fr'] != 100))]
     tune_grid = tune_grid[~((tune_grid['label'].isin(['pseudo', 'full'])) & (tune_grid['pl'] != 1) & (tune_grid['fr'] != 100))]
     tune_grid = tune_grid[~((tune_grid['fr'] == 20))]
+    tune_grid = tune_grid[~((tune_grid['label'] == 'full') & (tune_grid['filter_keywords'] == True) & (tune_grid['fr'] != 100))]
 
     tune_grid = tune_grid.sample(frac=1).reset_index(drop=True)
+    
+    
+    
+    
+    
+    
+    tune_grid1 = {'label': ['pseudo'],
+                 'pl': [1,2],
+                 'fr': [100],
+                 'filter_keywords': [True],
+                 'th': [70, 80],
+                 'lr': [2e-6],
+                 'w_decay': [0.1], 
+                 'n_batch': [16],
+                 'lab_smooth': [0.0],
+                 'cw': [0.05,0.5,1.0],
+             }
+    
+    tune_grid2 = {'label': ['full'],
+                 'pl': [1],
+                 'fr': [75,50,35],
+                 'filter_keywords': [True],
+                 'th': [90],
+                 'lr': [2e-6],
+                 'w_decay': [0.1], 
+                 'n_batch': [16],
+                 'lab_smooth': [0.0],
+                 'cw': [0.05,0.5,1.0],
+             }
+        
+    all_combinations = list(itertools.product(*tune_grid1.values()))
+    tune_grid1 = pd.DataFrame(all_combinations, columns=tune_grid.keys())
+    all_combinations = list(itertools.product(*tune_grid2.values()))
+    tune_grid2 = pd.DataFrame(all_combinations, columns=tune_grid.keys())
+    
+    tune_grid = pd.concat([tune_grid1, tune_grid2],ignore_index=True)
+    tune_grid = tune_grid.sample(frac=1).reset_index(drop=True)
+    
     
     for i in range(len(tune_grid)):
 
@@ -85,6 +126,7 @@ def run_from_cp(n_epoch = 3):
             "--sweep", "True",
             "--testing", "False",
             "--seed", "215",
+            "--full_determinism", str(full_determ),
             "--train_method", "finetune",
             "--label", label,
             "--overwrite_prompt", "False",
@@ -121,10 +163,11 @@ def run_from_cp(n_epoch = 3):
             "--folder_fn", folder_name,
             "--wandb_pn", "sweep_run_cw_final",
             "--final_sweep", "False",
-            "--early_stopping","True"
+            "--early_stopping","True",
+            "--wandb_disable", "True"
         ]
 
         print(f"\nRunning trial {folder_name}.")
         subprocess.run(command)
 
-run_from_cp(n_epoch=3)
+run_from_cp(n_epoch=2)

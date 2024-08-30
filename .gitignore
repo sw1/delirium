@@ -19,6 +19,8 @@ data_out/
 data_tmp*
 to_python/*
 to_python/
+from_python/*
+from_python/
 res/*
 res/
 scratch/*
@@ -28,6 +30,10 @@ sync/
 sync/sync_script.sh
 .github/*
 .github/
+figs/*
+figs/
+tbls/*
+tbls
 
 #large files
 *.pkl

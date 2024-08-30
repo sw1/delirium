@@ -103,6 +103,8 @@ tbl <- tbl %>%
   left_join(labs,by='id') %>%
   mutate(across(everything(),~replace_na(.x, -1)))
 
+tbl <- read_csv(file.path(path,'to_python','tbl_prefullfr.csv.gz'))
+
 combs <- read_rds(
   file.path(path,'data_out','10_labels_rfst_count_del_full.rds'))$combs %>%
   select(fracs,fracs_seed) %>%
@@ -120,15 +122,18 @@ tbl <- tbl %>%
 
 for (i in 1:nrow(combs)){
   set.seed(combs$fracs_seed[i])
-  ids <- exp_train_labs %>%
+  ids_keep <- exp_train_labs %>%
     group_by(label) %>%
     sample_frac(combs$fracs[i]) %>%
-    ungroup() %>%
-    pull(id)
+    ungroup() 
+  
+  ids_rm <- exp_train_labs %>%
+    anti_join(ids_keep,'id') 
   
   tbl <- tbl %>%
     mutate(!!glue('label_fullexpert_fr{combs$fracs[i] * 100}') := case_when(
-      id %in% ids ~ label,
+      id %in% ids_keep$id ~ label,
+      id %in% ids_rm$id ~ -1,
       set != 'train' ~ label,
       TRUE ~ 0))
 }
