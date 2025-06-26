@@ -1,5 +1,14 @@
-library(gridExtra)
-library(ggrepel)
+pacman::p_load(tidyverse,glue,gtsummary,flextable,icd.data,tidymodels,
+               rpart,rpart.plot,officer,gridExtra,ggrepel)
+
+
+if (Sys.info()['login'] == 'sw1'){
+  path <- 'D:\\Dropbox\\embeddings\\delirium'
+}
+if (Sys.info()['login'] == 'swolosz1'){
+  path <- 'C:\\Users\\swolosz1\\Dropbox\\embeddings\\delirium'
+}
+source(file.path(path,'code','fxns.R'))
 
 calc_m <- function(x1,x2,y1,y2) (y2-y1)/(x2-x1)
 
@@ -121,7 +130,7 @@ samps <- c(4937,609056,86512)
                    ndiff=5,n_wrap=20,window=150)) 
 
 ggsave(file.path(path,'figs','trends_p708090.png'), 
-       plot = fig, width = 15, height = 8, dpi = 300)
+       plot = fig, width = 15, height = 7.5, dpi = 300)
 
 
 trends1 <- read_csv(file.path(path,'from_python','fkw1_th90_fr100_pl1_lr2.0e-06_wd1.0e-01_nb16_ls0.0e+00_cw5_labpseudo_expert.csv.gz')) %>%
@@ -198,7 +207,7 @@ fig <- trend_plot(trends,samps,lab_size=1.75,top_n_pos=2,top_n_neg=2,
   scale_color_manual(values=c('black','black','black'),drop=FALSE)
 
 ggsave(file.path(path,'figs','trends_p708090_unlab.png'), 
-       plot = fig, width = 15, height = 5, dpi = 300)
+       plot = fig, width = 15, height = 7.5, dpi = 300)
 
 
 trends1 <- read_csv(file.path(path,'from_python','fkw1_th90_fr100_pl1_lr2.0e-06_wd1.0e-01_nb16_ls0.0e+00_cw5_labpseudo_unlabeled.csv.gz')) %>%
@@ -222,7 +231,7 @@ fig <- trend_plot(trends,samps,lab_size=1.75,top_n_pos=2,top_n_neg=2,
   scale_color_manual(values=c('black','black','black'),drop=FALSE)
 
 ggsave(file.path(path,'figs','trends_p90_123_unlab.png'),
-       plot = fig, width = 10, height = 7, dpi = 300)
+       plot = fig, width = 10, height = 5, dpi = 300)
 
 
 
@@ -246,4 +255,4 @@ fig <- trend_plot(trends,samps,lab_size=1.75,top_n_pos=2,top_n_neg=2,
   scale_color_manual(values=c('black','black','black'),drop=FALSE)
 
 ggsave(file.path(path,'figs','trends_plflam_unlab.png'),
-       plot = fig, width = 10, height = 7, dpi = 300)
+       plot = fig, width = 10, height = 5, dpi = 300)

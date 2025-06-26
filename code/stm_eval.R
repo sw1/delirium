@@ -17,29 +17,41 @@ weights <- read_csv(file.path(path,'data_out','stm_weights.csv.gz')) %>%
     feature == 'preds' & w < 0 ~ 'pred_neg',
     TRUE ~ feature
   ),w=if_else(feature == 'pred_neg',abs(w),w),
-  th = as.character(th)) %>%
-  group_by(feature,th) %>%
+  th = as.character(th),
+  pl = as.character(pl)) %>%
+  group_by(feature,th,pl,mod) %>%
   mutate(rank=dense_rank(desc(w))) %>%
   ungroup() %>%
   filter(rank <= 5)
 
+params <- weights %>%
+  select(th,pl,mod) %>%
+  distinct() 
 
 terms <- tibble()
-ths <- c('70','80','90')
-for (th in ths){
+for (i in 1:nrow(params)){
   
-  tm <- read_rds(file.path(path,'data_out',glue('stm_{th}.rds')))$tm
+  th <- params$th[i]
+  pl <- params$pl[i]
+  mod <- params$mod[i]
+  
+  tm <- read_rds(file.path(path,'data_out',
+                           glue('stm_th{th}_pl{pl}_mod{mod}.rds')))$tm
 
   top_words <- labelTopics(tm,n=20)
 
   top_freq <- as_tibble(top_words$prob) %>%
     mutate(K=row_number(),
            stat='freq',
+           pl=pl,
+           mod=mod,
            th=th)
   
   top_frex <- as_tibble(top_words$frex) %>%
     mutate(K=row_number(),
            stat='frex',
+           pl=pl,
+           mod=mod,
            th=th)
 
   terms <- terms %>%
@@ -49,20 +61,25 @@ for (th in ths){
 }
 
 top_freqs <- weights %>%
-  left_join(terms %>% filter(stat == 'freq'),by=c('th','K')) 
+  left_join(terms %>% filter(stat == 'freq'),
+            by=c('th','K','pl','mod')) 
 
 top_frex <- weights %>%
-  left_join(terms %>% filter(stat == 'frex'),by=c('th','K')) 
+  left_join(terms %>% filter(stat == 'frex'),
+            by=c('th','K','pl','mod')) 
 
 top_terms <- bind_rows(top_freqs,top_frex) %>%
-  select(-w) %>%
-  arrange(th,feature,rank)
+  select(mod,pl,th,feature,K,rank,stat,starts_with('V')) %>%
+  arrange(desc(th),pl,desc(mod),feature,rank)
 
 write_csv(top_terms,file.path(path,'data_out','stm_top_terms.csv.gz'))
 
 
 # top_terms %>%
-#   filter(th == '90',feature %in% c('tp','tn')) %>%
+#   filter(th == '90',
+#          pl == '1',
+#          feature %in% c('tp','tn')) %>%
+#   arrange(feature,rank,mod) %>%
 #   View()
 # dat <- read_rds(file.path(path,'data_out','stm_90.rds'))
 # tm <- dat$tm

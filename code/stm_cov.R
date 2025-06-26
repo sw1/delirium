@@ -9,11 +9,22 @@ if (Sys.info()['login'] == 'swolosz1'){
 }
 source(file.path(path,'code','fxns.R'))
 
-ths <- c('70','80','90')
-weights <- tibble()
-for (th in ths){
+K <- 30
 
-  dat <- read_rds(file.path(path,'data_out',glue('stm_{th}.rds')))
+params <- tibble(th = c('70','80','90','90','90'),
+                 pl = c('1','1','1','2','1'),
+                 mod = c('lf','lf','lf','lf','lam')) 
+
+
+weights <- tibble()
+for (i in 1:nrow(params)){
+  
+  th <- as.numeric(params$th[i])
+  pl <- as.numeric(params$pl[i])
+  mod <- params$mod[i]
+
+  dat <- read_rds(file.path(path,'data_out',
+                            glue('stm_th{th}_pl{pl}_mod{mod}.rds')))
   
   processed <- dat$processed
   docs <- dat$docs
@@ -35,11 +46,14 @@ for (th in ths){
     weights <- weights %>%
       bind_rows(tibble(w=sapply(res[[3]], function(x) x[2,1])) %>%
                   mutate(th=th,
+                         pl=pl,
+                         mod=mod,
                          feature=f,
                          K=row_number()))
     
   }
 }
+
 
 write_csv(weights,file.path(path,'data_out','stm_weights.csv.gz'))
   

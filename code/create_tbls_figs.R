@@ -1,5 +1,5 @@
 pacman::p_load(tidyverse,glue,gtsummary,flextable,icd.data,tidymodels,
-               rpart,rpart.plot,officer,gridExtra)
+               rpart,rpart.plot,officer,gridExtra,grid,ggrepel)
 
 if (Sys.info()['login'] == 'sw1'){
   path <- 'D:\\Dropbox\\embeddings\\delirium'
@@ -60,7 +60,9 @@ tbl1 <- read_rds(file.path(path,'data_out','03_tbl_final.rds')) %>%
            is.na(label) ~ 'Unlabeled',
            label == 1 ~ 'Label: 1',
            label == 0 ~ 'Label: 0',
-           TRUE ~ NA)) %>%
+           TRUE ~ NA),
+         num_allergies = round(num_allergies),
+         len_pmhx = round(len_pmhx)) %>%
   select(label,service,sex,age,los,num_meds,num_allergies,len_pmhx) %>%
   tbl_summary(by=label,
               statistic=list(all_continuous() ~ '{mean} ({sd})',       
@@ -70,16 +72,81 @@ tbl1 <- read_rds(file.path(path,'data_out','03_tbl_final.rds')) %>%
               label=list(                                           
                 label ~ 'Label', 
                 age ~ 'Age (Years)',
-                sex ~ 'Gender',
+                sex ~ 'Sex',
                 los ~ 'Length of Stay (Days)',
                 service ~ 'Service',
                 num_meds ~ 'Medications on Admission (Count)',
                 num_allergies ~ 'Allergies on Admission (Count)',
-                len_pmhx ~ 'Length of Past Medical History'),
+                len_pmhx ~ 'Length of Past Medical History (Characters)'),
               missing_text="Missing") %>%
   add_p(age ~ 'kruskal.test') %>%
   as_gt() %>%
   gt::gtsave(file.path(path,'tbls','demo_tbl.docx'))
+
+# 1. read + wrangle your data
+df <- read_rds(file.path(path, "data_out", "03_tbl_final.rds")) %>%
+  mutate(
+    sex = if_else(sex == 0, "female", "male"),
+    label = case_when(
+      is.na(label)   ~ "Unlabeled",
+      label == 1     ~ "Label: 1",
+      label == 0     ~ "Label: 0",
+      TRUE           ~ NA_character_
+    ),
+    num_allergies = round(num_allergies),
+    len_pmhx       = round(len_pmhx)
+  ) %>%
+  select(label, service, sex, age, los, num_meds, num_allergies, len_pmhx)
+
+# 2. build your summary table (no add_p)
+tbl <- df %>%
+  tbl_summary(
+    by = label,
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 1,
+    type   = all_categorical() ~ "categorical",
+    label  = list(
+      label         ~ "Label",
+      service       ~ "Service",
+      sex           ~ "Sex",
+      age           ~ "Age (Years)",
+      los           ~ "Length of Stay (Days)",
+      num_meds      ~ "Medications on Admission (Count)",
+      num_allergies ~ "Allergies on Admission (Count)",
+      len_pmhx      ~ "Length of Past Medical History (Characters)"
+    ),
+    missing_text = "Missing"
+  ) %>%
+  
+  # 3. add the MAD column
+  modify_table_body(
+    ~ .x %>%
+      rowwise() %>%
+      mutate(
+        MAD = {
+          # pull out every “stat_…” column (one per label)
+          raw_vals <- c_across(starts_with("stat_"))
+          # drop everything except the number
+          nums     <- parse_number(raw_vals)
+          # mean absolute deviation
+          round(mean(abs(nums - mean(nums))), 1)
+        }
+      ) %>%
+      ungroup()
+  ) %>%
+  
+  # 4. give it a nice header
+  modify_header(
+    list(MAD ~ "**MAD**")
+  )
+
+# 5. render + save
+tbl %>%
+  as_gt() %>%
+  gt::gtsave(file.path(path, "tbls", "demo_tbl2.docx"))
 
 # generate data summary table
 tbl1 <- read_rds(file.path(path,'data_out','03_tbl_final.rds')) %>% 
@@ -269,30 +336,44 @@ perf$features %>%
   save_as_docx(path=file.path(path,'tbls','imp_tbl.docx'))
 
 p1 <- read_csv(file.path(path,'to_python','tbl.csv.gz')) %>%
+  left_join(read_csv(file.path(path,'data_out','02a_icd_tbl_pub.csv')),
+            by='id') %>%
   filter(set == 'train') %>%
-  select(contains('full'),contains('pseudo')) %>%
+  select(contains('full'),contains('pseudo'),contains('icd')) %>%
   pivot_longer(everything(),values_to = 'label') %>%
   group_by(name,label) %>%
   reframe(n=n()) %>%
   mutate(fr=factor(str_extract(name,'fr[0-9]+') %>% parse_number()),
          th=str_extract(name,'th[0-9]+') %>% parse_number(),
-         th=factor(if_else(is.na(th),0,th)),
-         label=factor(if_else(label == -1,'Unlabeled',as.character(label)),
-                      levels=c('Unlabeled','1','0'),ordered=TRUE),
+         th=if_else(is.na(th),0,th),
+         th=case_when(
+           name == 'label_icd' ~ 'ICD',
+           name == 'label_pub_icd' ~ 'ICD*',
+           name == 'label_fullexpert_fr100' ~ 'Liberal',
+           TRUE ~ as.character(th)),
+         th=factor(th,levels=c('60','70','80','90','Liberal','ICD','ICD*')),
+         label=factor(case_when(
+           label == -1 | is.na(label) ~ 'Unlabeled',
+           label == 1 ~ 'Positive',
+           label == 0 ~ 'Negative'),
+           levels=c('Positive','Negative','Unlabeled'),ordered=TRUE),
          set=if_else(str_detect(name,'fullexpert'),'liberal','pseudo')) %>%
   select(-name) %>%
-  filter(set == 'pseudo',
-         fr == 100) %>%
+  filter((set == 'pseudo' & fr == 100) | 
+           str_detect(th,'ICD') |
+           (set == 'liberal' & fr == 100)) %>%
+  select(-set) %>%
   ggplot(aes(x=th,y=n,fill=label)) +
   geom_col(position='fill',color='black',alpha=0.5,width=1) +
-  scale_fill_manual(values=c('gray','red','lightblue')) +
+  # scale_fill_manual(values=c('gray','red','lightblue')) +
   scale_x_discrete(drop = TRUE) +
-  theme(legend_position='none') +
   theme_classic() +
+  theme(legend.position='none') +
   labs(x='Self-Training Threshold',
        y='',
        title='',
-       fill='') 
+       fill='') +
+  scale_fill_brewer(type='qual',palette='Set1') 
 
 p2 <- read_csv(file.path(path,'to_python','tbl.csv.gz')) %>%
   filter(set == 'train') %>%
@@ -303,24 +384,202 @@ p2 <- read_csv(file.path(path,'to_python','tbl.csv.gz')) %>%
   mutate(fr=factor(str_extract(name,'fr[0-9]+') %>% parse_number()),
          th=str_extract(name,'th[0-9]+') %>% parse_number(),
          th=factor(if_else(is.na(th),0,th)),
-         label=factor(if_else(label == -1,'Unlabeled',as.character(label)),
-                      levels=c('Unlabeled','1','0'),ordered=TRUE),
+         label=factor(case_when(
+           label == -1 ~ 'Unlabeled',
+           label == 1 ~ 'Positive',
+           label == 0 ~ 'Negative'),
+           levels=c('Positive','Negative','Unlabeled'),ordered=TRUE),
          set=if_else(str_detect(name,'fullexpert'),'liberal','pseudo')) %>%
   select(-name) %>%
   filter(set == 'pseudo',
          th == 90) %>%
   ggplot(aes(x=fr,y=n,fill=label)) +
   geom_col(position='fill',color='black',alpha=0.5,width=1) +
-  scale_fill_manual(values=c('gray','red','lightblue')) +
+  # scale_fill_manual(values=c('gray','red','lightblue')) +
   scale_x_discrete(drop = TRUE) +
-  theme(legend_position='bottom') +
   theme_classic() +
+  theme(legend.position='bottom') +
   labs(x='Proportion of Expert Labels for Self-Training (%)',
        y='',
        title='',
-       fill='') 
+       fill='') +
+  scale_fill_brewer(type='qual',palette='Set1') 
 fig <- grid.arrange(p1,p2,ncol=1)
 ggsave(plot=fig,file.path(path,'figs','pseudo_dist.png'),width=5,height=7)
+
+
+
+
+comps <- read_csv(file.path(path,'to_python','tbl.csv.gz')) %>%
+  filter(set == 'train') %>%
+  left_join(read_csv(file.path(path,'data_out','02a_icd_tbl_pub.csv')),
+            by='id') %>% 
+  select(contains('icd'),label_fullexpert_fr100,matches('pseudo.*fr100')) %>%
+  filter_all(all_vars(!is.na(.) & . != -1))
+
+# Function to calculate Jaccard similarity
+jaccard_similarity <- function(x, y) {
+  intersection <- sum(x & y)
+  union <- sum(x | y)
+  return(intersection / union)
+}
+
+jaccard_matrix <- matrix(NA, ncol = ncol(comps), nrow = ncol(comps))
+colnames(jaccard_matrix) <- colnames(comps)
+rownames(jaccard_matrix) <- colnames(comps)
+
+for (i in 1:ncol(comps)) {
+  for (j in 1:ncol(comps)) {
+    jaccard_matrix[i, j] <- jaccard_similarity(comps[, i], comps[, j])
+  }
+}
+
+# Convert matrix to long format for ggplot
+fig <- reshape2::melt(jaccard_matrix) %>%
+  mutate(Var1 = case_when(
+    Var1 == 'label_icd' ~ 'Label: ICD',
+    Var1 == 'label_pub_icd' ~ 'Label: ICD*',
+    Var1 == 'label_fullexpert_fr100' ~ 'Label: Liberal',
+    TRUE ~ paste('Pseudo Threshold:',as.character(str_extract(Var1,'th[0-9]+') %>% parse_number()))),
+    Var2 = case_when(
+      Var2 == 'label_icd' ~ 'Label: ICD',
+      Var2 == 'label_pub_icd' ~ 'Label: ICD*',
+      Var2 == 'label_fullexpert_fr100' ~ 'Label: Liberal',
+      TRUE ~ paste('Pseudo Threshold:',as.character(str_extract(Var2,'th[0-9]+') %>% parse_number()))),
+    Var1 = factor(Var1,levels=c('Pseudo Threshold: 60','Pseudo Threshold: 70',
+                                'Pseudo Threshold: 80','Pseudo Threshold: 90',
+                                'Label: Liberal','Label: ICD','Label: ICD*')),
+    Var2 = factor(Var2,levels=c('Pseudo Threshold: 60','Pseudo Threshold: 70',
+                                'Pseudo Threshold: 80','Pseudo Threshold: 90',
+                                'Label: Liberal','Label: ICD','Label: ICD*'))) %>%
+  ggplot(aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(type='seq',direction = 1,limits=c(0,1)) +
+  labs(x = "",
+       y = "",
+       fill = "") +
+  theme_classic() +
+  coord_fixed() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+ggsave(plot=fig,file.path(path,'figs','labs_jaccard.png'),width=7,height=5)
+
+
+comps <- read_csv(file.path(path,'to_python','tbl.csv.gz')) %>%
+  filter(set == 'train') %>%
+  left_join(read_csv(file.path(path,'data_out','02a_icd_tbl_pub.csv')),
+            by='id') %>% 
+  select(id,contains('icd'),label_fullexpert_fr100,matches('pseudo.*fr100')) %>%
+  filter_all(all_vars(!is.na(.) & . != -1)) %>%
+  left_join(read_rds(file.path(path,'data_out','09_alldat_preprocessed_for_pred.rds')) %>%
+              select(id,starts_with('count_')),by='id') %>%
+  mutate_at(vars(starts_with('count_')),~if_else(. > 0,1,0)) %>%
+  select(-id)
+
+jaccard_matrix <- matrix(NA, ncol = ncol(comps), nrow = ncol(comps))
+colnames(jaccard_matrix) <- colnames(comps)
+rownames(jaccard_matrix) <- colnames(comps)
+
+for (i in 1:ncol(comps)) {
+  for (j in 1:ncol(comps)) {
+    jaccard_matrix[i, j] <- jaccard_similarity(comps[, i], comps[, j])
+  }
+}
+
+# Convert matrix to long format for ggplot
+df <- reshape2::melt(jaccard_matrix) %>%
+  mutate(Var1 = case_when(
+    Var1 == 'label_icd' ~ 'Label: ICD',
+    Var1 == 'label_pub_icd' ~ 'Label: ICD*',
+    Var1 == 'label_fullexpert_fr100' ~ 'Label: Liberal',
+    str_detect(Var1,'count')  & !str_detect(Var1,'service')~ str_replace(Var1,'count_',''),
+    str_detect(Var1,'service') ~ str_replace(Var1,'count_service','Service: '),
+    str_detect(Var1,'pseudo') ~ paste("Pseudo Threshold: ",str_extract(Var1,'th[0-9]+') %>% parse_number()),
+    TRUE ~ Var1),
+    Var2 = case_when(
+      Var2 == 'label_icd' ~ 'Label: ICD',
+      Var2 == 'label_pub_icd' ~ 'Label: ICD*',
+      Var2 == 'label_fullexpert_fr100' ~ 'Label: Liberal',
+      str_detect(Var2,'count') & !str_detect(Var2,'service') ~ str_replace(Var2,'count_',''),
+      str_detect(Var2,'service') ~ str_replace(Var2,'count_service','Service: '),
+      str_detect(Var2,'pseudo') ~ paste("Pseudo Threshold: ",str_extract(Var2,'th[0-9]+') %>% parse_number()),
+      TRUE ~ Var2)) %>%
+  mutate(Var1 = str_replace(Var1,'_hc',''),
+         Var2 = str_replace(Var2,'_hc',''),
+         Var1 = str_replace(Var1,'med$','medication'),
+         Var2 = str_replace(Var2,'med$','medication'),
+         Var1 = str_replace(Var1,'inf','infection'),
+         Var2 = str_replace(Var2,'inf','infection'),
+         Var1 = if_else(str_detect(Var1,'prob'),
+                        glue("Problem List: {str_replace(Var1,'prob','')}"),
+                        Var1),
+         Var2 = if_else(str_detect(Var2,'prob'),
+                        glue("Problem List: {str_replace(Var2,'prob','')}"),
+                        Var2),
+         Var1 = if_else(str_detect(Var1,'ms'),
+                        glue("Mental Status: {str_replace(Var1,'ms','')}"),
+                        Var1),
+         Var2 = if_else(str_detect(Var2,'ms'),
+                        glue("Mental Status: {str_replace(Var2,'ms','')}"),
+                        Var2),
+         Var1 = if_else(str_detect(Var1,'dd'),
+                        glue("Discharge Diagnosis: {str_replace(Var1,'dd','')}"),
+                        Var1),
+         Var2 = if_else(str_detect(Var2,'dd'),
+                        glue("Discharge Diagnosis: {str_replace(Var2,'dd','')}"),
+                        Var2),
+         Var1 = str_replace(Var1,'alz','alzheimer'),
+         Var2 = str_replace(Var2,'alz','alzheimer'),
+         Var1 = str_replace(Var1,'conf','confused'),
+         Var2 = str_replace(Var2,'conf','confused'),
+         Var1 = str_replace(Var1,'psych','psychiatric'),
+         Var2 = str_replace(Var2,'psych','psychiatric'),
+         Var1 = str_replace(Var1,'nsurg','neurosurgery'),
+         Var2 = str_replace(Var2,'nsurg','neurosurgery'),
+         Var1 = str_replace(Var1,'del','delirium'),
+         Var2 = str_replace(Var2,'del','delirium'),
+         Var1 = str_replace(Var1,'hep$','hepatic'),
+         Var2 = str_replace(Var2,'hep$','hepatic'),
+         Var1 = str_replace(Var1,'geri$','geriatric'),
+         Var2 = str_replace(Var2,'geri$','geriatric'),
+         Var1 = str_replace(Var1,'exf','Discharge Disposition: services'),
+         Var2 = str_replace(Var2,'exf','Discharge Disposition: services'),
+         Var1 = str_replace(Var1,'toxenceph','toxic encephalopathy'),
+         Var2 = str_replace(Var2,'toxenceph','toxic encephalopathy'),
+         Var1 = str_replace(Var1,'tox$','toxic'),
+         Var2 = str_replace(Var2,'tox$','toxic'),
+         Var1 = str_replace(Var1,'home','Discharge Disposition: home'),
+         Var2 = str_replace(Var2,'home','Discharge Disposition: home'),
+         Var1 = str_replace(Var1,'hepenceph',' hepatic encephalopathy'),
+         Var2 = str_replace(Var2,'hepenceph',' hepatic encephalopathy'),
+         Var1 = if_else(str_detect(Var1,'\\:'),Var1,paste('Hospital Course:',Var1)),
+         Var2 = if_else(str_detect(Var2,'\\:'),Var2,paste('Hospital Course:',Var2)),
+         Var1 = str_replace(Var1,'enceph_','encephalopathy'),
+         Var2 = str_replace(Var2,'enceph_','encephalopathy'),
+         Var1 = str_replace(Var1,'_',' '),
+         Var2 = str_replace(Var2,'_',' '),
+         Var1 = str_squish(Var1),
+         Var2 = str_squish(Var2)) %>%
+  filter(!str_detect(Var1,'Mental Status|Problem List|Service'),
+         !str_detect(Var2,'Mental Status|Problem List|Service'))
+
+fig <- df %>%
+  ggplot(aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(type='seq',direction = 1) +
+  labs(x = "",
+       y = "",
+       fill = "") +
+  theme_classic() +
+  coord_fixed() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+ggsave(plot=fig,file.path(path,'figs','labs_feats_jaccard.png'),width=7,height=6)
+
+
+
+
+
+
+
 
 read_csv(file.path(path,'to_python','tbl.csv.gz')) %>%
   filter(set == 'train',
@@ -480,13 +739,35 @@ llm_res %>%
   labs(color='',x='F1',y='Balanced Accuracy',
        title='Percentage of Fractionated Data (%)') 
 
+baseline <- read_csv(file.path(path,'res','15_lasso_results.csv.gz')) %>%
+  filter(!is.na(b_acc),
+         fraction == 100 | is.na(fraction)) %>%
+  mutate(threshold=if_else(is.na(threshold),'',as.character(threshold)),
+         w = as.integer(w),
+         prop1=num(prop1*100,label='%'),
+         lab=case_when(
+           label == 'fullexpert' ~ 'Liberal',
+           label == 'onlyexpert' ~ 'Strict',
+           label == 'icd' ~ 'ICD',
+           label == 'pseudo' ~ 'Pseudo'
+         )) %>%
+  select(-fn,-fraction) %>%
+  arrange(label,desc(b_acc),desc(f1)) %>%
+  group_by(label) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  filter(label != 'icd') %>%
+  select(b_accuracy=b_acc,
+         f1,
+         lab) %>%
+  mutate(set = 'Baseline Model')
 
 llm1 <-
   llm_res %>%
   mutate(lab=case_when(
     lab == 'full' ~ 'Liberal',
     lab == 'only' ~ 'Strict',
-    lab == 'pseudo' ~ 'Pseudo'
+    lab == 'pseudo' ~ 'Pseudo',
   ),set=case_when(
     set == 'filtered' ~ 'Filtered',
     set == 'expert' ~ 'Expert Labels',
@@ -499,6 +780,7 @@ llm1 <-
          set != 'Filtered',
          !(pl %in% c(1,3) & lab == 'Pseudo'),
          fkw == 1) %>%
+  bind_rows(baseline) %>%
   ggplot(aes(f1,b_accuracy,color=lab,shape=set)) +
   geom_point(alpha=0.5,size=5) +
   theme_classic() +
@@ -512,10 +794,10 @@ llm1 <-
         plot.title = element_text(face = "plain", size = 10),
         panel.grid.major = element_line(color = "grey80", size = 0.5)) +
   scale_color_brewer(type='qual',palette='Set1') +
-  # scale_shape_manual(values=c(1,2)) + 
+  scale_shape_manual(values=c(3,16,17)) + 
   # facet_grid(~set) +
-  xlim(.49,1) + ylim(.49,1) +
-  labs(color='Label Strategy.',shape='Class Weight',
+  xlim(0,1) + ylim(0.4,1) +
+  labs(color='',shape='',
        x='F1',y='Balanced Accuracy',
        title='')
 
@@ -552,17 +834,53 @@ llm2 <-
         panel.grid.major = element_line(color = "grey80", size = 0.5)) +
   scale_color_brewer(type='qual',palette='Set1') +
   facet_wrap(~fr) + 
-  xlim(.49,1) + ylim(.49,1) +
-  labs(color='Label Strategy.',shape='Class Weight',
+  xlim(.7,1) + ylim(.7,1) +
+  labs(color='',shape='',
        x='F1',y='Balanced Accuracy',
-       title='Proportion of Expert Labels for Self-Training (%)')
+       title='Fraction of Expert Labels for ST (%)')
 
-fig <- grid.arrange(llm1,llm2,ncol=2,bottom='Balanced Accuracy',
+fig <- grid.arrange(llm1,llm2,ncol=2,bottom='',
                     widths=c(1,.5))
 ggsave(plot = fig,
        file.path(path,'figs','lf_res_final.png'),width=10,height=5,dpi = 300)
 
-llm_res %>%
+fig_th1 <- llm_res %>%
+  mutate(lab=case_when(
+    lab == 'full' ~ 'Liberal',
+    lab == 'only' ~ 'Strict',
+    lab == 'pseudo' ~ 'Pseudo'
+  ),set=case_when(
+    set == 'filtered' ~ 'Filtered',
+    set == 'expert' ~ 'Expert',
+    set == 'icd' ~ 'ICD'
+  ),cw = as.factor(cw)) %>%
+  filter(fr == 100,
+         set != 'filtered',
+         cw == 5,
+         fkw == 1,
+         !(pl %in% c(2,3) & lab == 'Pseudo'),
+         set == 'Expert',
+         lab == 'Pseudo') %>%
+  mutate(th=as.factor(th)) %>%
+  ggplot(aes(f1,b_accuracy,color=th)) +
+  geom_point(alpha=0.5,size=5) +
+  theme_classic() +
+  theme(aspect.ratio = 1,
+        legend.position = 'bottom',
+        legend.box='Vertical',
+        legend.spacing.x=unit(0.0,'cm'),
+        plot.margin = unit(c(1, 1, 1, -5),"cm"),
+        legend.spacing.y=unit(-0.2,'cm'),
+        panel.border = element_rect(color='black',fill=NA,linewidth=0.5),
+        plot.title = element_text(face = "plain", size = 10),
+        panel.grid.major = element_line(color = "grey80", size = 0.5)) +
+  xlim(0.5,1) + ylim(0.5,1) +
+  scale_color_brewer(type='qual',palette='Set1') +
+  labs(x='F1',y='Balanced Accuracy',
+       color='ST Threshold')
+
+
+fig_th2 <- llm_res %>%
   mutate(lab=case_when(
     lab == 'full' ~ 'Liberal',
     lab == 'only' ~ 'Strict',
@@ -586,8 +904,9 @@ llm_res %>%
   geom_point(alpha=0.7,size=5) +
   theme_classic() +
   theme(aspect.ratio = 1,
-        legend.position = 'bottom',
+        legend.position = 'none',
         legend.box='Vertical',
+        plot.margin = unit(c(1, 1, 1, -5),"cm"),
         legend.spacing.x=unit(0.0,'cm'),
         legend.spacing.y=unit(-0.2,'cm'),
         panel.border = element_rect(color='black',fill=NA,linewidth=0.5),
@@ -595,8 +914,13 @@ llm_res %>%
         panel.grid.major = element_line(color = "grey80", size = 0.5)) +
   xlim(0,0.5) + ylim(0,0.5) +
   scale_color_brewer(type='qual',palette='Set1') +
-  labs(color='Self-Training Threshold')
-ggsave(file.path(path,'res','fpr_fnr_th.png'),width=5,height=5)
+  labs(color='ST Threshold')
+
+fig <- grid.arrange(fig_th1,fig_th2,ncol=2,bottom='',
+                    widths=c(1,.5))
+ggsave(plot = fig,
+       file.path(path,'figs','th_fpr_fnr_th.png.png'),
+       width=10,height=5,dpi = 300)
 
 
 border_style <- officer::fp_border(color='black', width=1)
@@ -700,7 +1024,9 @@ llm_res %>%
 
 
 read_csv(file.path(path,'data_out','stm_top_terms.csv.gz')) %>%
-  select(`Thres.`=th,
+  select(Model=mod,
+         `P.L.`=pl,
+         `Thres.`=th,
          `Feat.`=feature,
          Rank=rank,
          K,
@@ -714,9 +1040,15 @@ read_csv(file.path(path,'data_out','stm_top_terms.csv.gz')) %>%
     `Feat.` == 'tp' ~ 'TP',
     `Feat.` == 'pred_pos' ~ 'PP',
     `Feat.` == 'pred_neg' ~ 'PN',
+  ),`P.L.`=case_when(
+    `P.L.` == 1 ~ 'FT',
+    `P.L.` == 2 ~ 'FT+PT'
   ),`Stat.`=case_when(
     `Stat.` == 'frex' ~ 'FREX',
-    `Stat.` == 'freq' ~ 'Freq.',
+    `Stat.` == 'freq' ~ 'Freq',
+  ),Model=case_when(
+    Model == 'lf' ~ 'LF',
+    Model == 'lam' ~ 'Llama'
   )) %>% 
   write_csv(file.path(path,'tbls','top_terms.csv'))
 
@@ -732,9 +1064,9 @@ img2 <- image_crop(img2, "1500x1100+1330+400")
 image_write(img2, file.path(path,'figs','topic2_cropped.png'))
 
 label1 <- textGrob("'Volume-Overload Topic'", 
-                   gp=gpar(fontsize=10, fontface="bold"))
+                   gp=gpar(fontsize=14, fontface="bold"))
 label2 <- textGrob("'Renal-Failure Topic'", 
-                   gp=gpar(fontsize=10, fontface="bold"))
+                   gp=gpar(fontsize=14, fontface="bold"))
 
 img1 <- rasterGrob(readPNG(file.path(path,'figs','topic1_cropped.png')), 
                    interpolate = TRUE)
@@ -743,7 +1075,7 @@ img2 <- rasterGrob(readPNG(file.path(path,'figs','topic2_cropped.png')),
 fig <- grid.arrange(label1, label2, img1, img2, ncol=2, nrow=2, 
              heights=c(0.1,1),widths=c(1,1),
              layout_matrix=rbind(c(1, 2), c(3, 4)))
-ggsave(plot=fig,file.path(path,'figs','top_topic_terms.png'),width=9,height=6)
+ggsave(plot=fig,file.path(path,'figs','top_topic_terms.png'),width=7,height=3.5)
 
 
 trends1 <- read_csv(file.path(path,'from_python','fkw1_th70_fr100_pl1_lr2.0e-06_wd1.0e-01_nb16_ls0.0e+00_cw5_labpseudo_unlabeled.csv.gz')) %>%

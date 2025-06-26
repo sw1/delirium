@@ -9,12 +9,30 @@ if (Sys.info()['login'] == 'swolosz1'){
 }
 source(file.path(path,'code','fxns.R'))
 
-ths <- c('70','80','90')
 K <- 30
 
-for (th in ths){
-  run <- glue('fkw1_th{th}_fr100_pl1_lr2.0e-06_wd1.0e-01',
+params <- tibble(th = c('70','80','90','90','90'),
+               pl = c('1','1','1','2','1'),
+               mod = c('lf','lf','lf','lf','lam')) 
+
+runs <- vector(mode='character',length=nrow(params))
+for (i in 1:nrow(params)){
+  runs[i] <- glue('fkw1_th{params$th[i]}_fr100_',
+              'pl{params$pl[i]}_lr2.0e-06_wd1.0e-01',
               '_nb16_ls0.0e+00_cw5_labpseudo_train.csv.gz')
+  if (params$mod[i] == 'lam') {
+    runs[i] <- str_replace(runs[i],'\\.csv\\.gz',
+                                          glue('_{params$mod[i]}\\.csv\\.gz'))
+    runs[i] <- str_replace(runs[i],'lr2.0e-06','lr5.0e-05')
+  }
+  
+}
+
+for (run in runs){
+  
+  th <- str_match(run,'th(\\d+)')[,2]
+  pl <- str_match(run,'pl(\\d+)')[,2]
+  if (str_detect(run,'lam')) mod <- 'lam' else mod <- 'lf'
   
   set.seed(2342)
   dat <- read_csv(file.path(path,'from_python',run)) %>%
@@ -48,7 +66,7 @@ for (th in ths){
             K=K,verbose=TRUE,init.type='Spectral',seed=123)
   
   write_rds(list(tm=tm,processed=processed,docs=docs),
-            file.path(path,'data_out',glue('stm_{th}.rds')))
+            file.path(path,'data_out',glue('stm_th{th}_pl{pl}_mod{mod}.rds')))
   
 }
 
